@@ -9,7 +9,7 @@ import {
 } from 'pdfjs-dist'
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Annotation, Point, Rect, Rotation } from '@pdf-atelier/core'
-import { isSupportedSubtype, readAtelierAnnotations } from './atelier.ts'
+import { HIDDEN_FLAGS, isSupportedSubtype, readAtelierData, type AtelierData } from './atelier.ts'
 import type { OutlineItem, PdfLink, PdfSource, RenderOptions, SearchHit } from './types.ts'
 
 let assetsBaseUrl: string | null = null
@@ -66,7 +66,7 @@ export async function loadPdf(
 class PdfJsSource implements PdfSource {
   readonly pageCount: number
   #hidden = new Map<number, Promise<void>>()
-  #atelier: Promise<Map<string, Annotation>> | null = null
+  #atelier: Promise<AtelierData> | null = null
 
   constructor(
     readonly id: string,
@@ -82,14 +82,40 @@ class PdfJsSource implements PdfSource {
     return this.doc.getPage(index + 1)
   }
 
+  #data() {
+    this.#atelier ??= readAtelierData(this.bytes, this.password).catch(
+      (): AtelierData => ({ annotations: new Map(), images: [], bookmarks: [], bookmarkGroup: null }),
+    )
+    return this.#atelier
+  }
+
+  /**
+   * Page annotations (all intents, so NoView replies are included) and the ids the app owns.
+   * Same rule as ownsAnnot in atelier.ts: our JSON; a reply whose same-page parent is owned; else a visible
+   * supported subtype.
+   */
+  async #classify(index: number) {
+    const page = await this.#page(index)
+    const list = (await page.getAnnotations({ intent: 'any' })) as PdfJsAnnotation[]
+    const { annotations: ours } = await this.#data()
+    const byId = new Map(list.map((a) => [String(a.id), a]))
+    const owns = (a: PdfJsAnnotation, depth = 0): boolean => {
+      if (ours.has(String(a.id))) return true
+      if (a.subtype === 'Text' && a.inReplyTo) {
+        const parent = byId.get(a.inReplyTo)
+        return !!parent && depth < 8 && owns(parent, depth + 1)
+      }
+      return isSupportedSubtype(a.subtype) && !((a.annotationFlags ?? 0) & HIDDEN_FLAGS)
+    }
+    return { page, list, byId, ours, owned: new Set(list.filter((a) => owns(a)).map((a) => String(a.id))) }
+  }
+
   /** Hides annotations the app draws itself (see loadPdf). */
   #hideSupported(index: number) {
     let p = this.#hidden.get(index)
     if (!p) {
-      p = this.#page(index).then(async (page) => {
-        for (const a of (await page.getAnnotations()) as PdfJsAnnotation[]) {
-          if (isSupportedSubtype(a.subtype)) this.doc.annotationStorage.setValue(a.id, { noView: true })
-        }
+      p = this.#classify(index).then(({ owned }) => {
+        for (const id of owned) this.doc.annotationStorage.setValue(id, { noView: true })
       })
       this.#hidden.set(index, p)
     }
@@ -218,18 +244,40 @@ class PdfJsSource implements PdfSource {
   }
 
   async getAnnotations(index: number, pageId: string): Promise<Annotation[]> {
-    const page = await this.#page(index)
-    this.#atelier ??= readAtelierAnnotations(this.bytes, this.password).catch(() => new Map())
-    const atelier = await this.#atelier
-    const result: Annotation[] = []
-    for (const a of (await page.getAnnotations()) as PdfJsAnnotation[]) {
-      if (!isSupportedSubtype(a.subtype)) continue
-      const importedFrom = { objectId: String(a.id) }
-      const ours = atelier.get(importedFrom.objectId)
-      const ann = ours ? { ...ours, pageId, importedFrom } : fromPdfJs(page, a, pageId, importedFrom)
-      if (ann) result.push(ann)
+    const { page, list, byId, ours, owned } = await this.#classify(index)
+    const result = new Map<string, Annotation>() // by pdf.js object id
+    const replies: PdfJsAnnotation[] = []
+    for (const a of list) {
+      const objectId = String(a.id)
+      if (!owned.has(objectId)) continue
+      if (a.subtype === 'Text' && a.inReplyTo && !ours.has(objectId)) {
+        replies.push(a)
+        continue
+      }
+      const importedFrom = { objectId }
+      const mine = ours.get(objectId)
+      const ann = mine ? { ...mine, pageId, importedFrom } : fromPdfJs(page, a, pageId, importedFrom)
+      if (ann) result.set(objectId, ann)
     }
-    return result
+    // Foreign reply threads: attach to the root annotation. Our own annotations carry replies in their JSON.
+    for (const r of replies) {
+      let root = r
+      for (let i = 0; i < 8 && root.subtype === 'Text' && root.inReplyTo && byId.has(root.inReplyTo); i++) root = byId.get(root.inReplyTo)!
+      const parent = result.get(String(root.id))
+      if (!parent || ours.has(String(root.id))) continue
+      ;(parent.replies ??= []).push({
+        id: crypto.randomUUID(),
+        text: String(r.contentsObj?.str ?? ''),
+        createdAt: Date.now(),
+        ...(r.titleObj?.str && { author: String(r.titleObj.str) }),
+      })
+    }
+    return [...result.values()]
+  }
+
+  async getAtelierExtras() {
+    const { images, bookmarks } = await this.#data()
+    return { images, bookmarks }
   }
 
   async getOutline(): Promise<OutlineItem[]> {
@@ -241,7 +289,10 @@ class PdfJsSource implements PdfSource {
           children: await convert(it.items as typeof items),
         })),
       )
-    return convert((await this.doc.getOutline()) ?? [])
+    const items = (await this.doc.getOutline()) ?? []
+    // Our bookmarks group is exposed via getAtelierExtras(), not as outline.
+    const { bookmarkGroup } = await this.#data()
+    return convert(bookmarkGroup === null ? items : items.filter((_, i) => i !== bookmarkGroup))
   }
 
   async destroy() {
@@ -319,6 +370,10 @@ function fromPdfJs(
       const [x1, y1, x2, y2] = a.lineCoordinates as number[]
       const arrow = (a.lineEndings as string[] | undefined)?.some((e) => e && e !== 'None')
       return { ...base, type: arrow ? 'arrow' : 'line', from: toPoint(page, x1!, y1!), to: toPoint(page, x2!, y2!) }
+    }
+    case 'Text': {
+      const r = toRect(page, a.rect)
+      return { ...base, type: 'note', at: { x: r.x, y: r.y } }
     }
     case 'FreeText': {
       // For FreeText, /Contents is the text itself, not a note.

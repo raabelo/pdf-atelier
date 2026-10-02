@@ -49,6 +49,9 @@ export function viewToPageRect(r: Rect, page: Size, rotation: Rotation, scale: n
   )
 }
 
+/** Sticky note icon size in points. */
+export const NOTE_SIZE = 20
+
 function boundsOfPoints(points: Point[]): Rect {
   const xs = points.map((p) => p.x)
   const ys = points.map((p) => p.y)
@@ -67,6 +70,8 @@ export function annotationBounds(a: Annotation): Rect {
     case 'line':
     case 'arrow':
       return normalizeRect(a.from, a.to)
+    case 'note':
+      return { ...a.at, width: NOTE_SIZE, height: NOTE_SIZE }
     default:
       return a.rect
   }
@@ -87,6 +92,8 @@ export function translateAnnotation<A extends Annotation>(a: A, dx: number, dy: 
     case 'line':
     case 'arrow':
       return { ...a, from: move(a.from, dx, dy), to: move(a.to, dx, dy) }
+    case 'note':
+      return { ...a, at: move(a.at, dx, dy) }
     default:
       return { ...a, rect: moveRect(a.rect, dx, dy) }
   }

@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- poking at untyped pdf.js data in assertions */
-import { PDFDocument, StandardFonts } from '@cantoo/pdf-lib'
+import { PDFDocument, PDFName, PDFString, StandardFonts } from '@cantoo/pdf-lib'
 import { getDocument } from 'pdfjs-dist'
-import type { Annotation, AnnotationStyle, DocumentModel } from '@pdf-atelier/core'
+import { BLANK_SOURCE, type Annotation, type AnnotationStyle, type DocumentModel } from '@pdf-atelier/core'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises' // eslint-disable-line no-restricted-imports -- test-only font loading
 import { exportPdf, loadPdf, readAtelierAnnotations } from './index.ts'
@@ -106,6 +106,8 @@ describe('pdf engine + writer', () => {
         { id: 'p0', sourceId: 's1', sourceIndex: 0, width: 600, height: 800, rotation: 90 },
       ],
       annotations: Object.fromEntries(anns.map((a) => [a.id, a])),
+      images: {},
+      bookmarks: [],
     }
     const out = await exportPdf(doc, new Map([['s1', { bytes }]]))
 
@@ -174,6 +176,8 @@ describe('pdf engine + writer', () => {
       sources: { s1: { id: 's1', name: 'a.pdf' } },
       pages: [{ id: 'p0', sourceId: 's1', sourceIndex: 0, width: 600, height: 800, rotation: 0 }],
       annotations: Object.fromEntries([...imported, ink].map((a) => [a.id, a])),
+      images: {},
+      bookmarks: [],
     }
     const out = await exportPdf(doc, new Map([['s1', { bytes, password: 's3cret' }]]))
 
@@ -195,6 +199,8 @@ describe('pdf engine + writer', () => {
       sources: { s1: { id: 's1', name: 'a.pdf' } },
       pages: [{ id: 'p0', sourceId: 's1', sourceIndex: 0, width: 600, height: 800, rotation: 0 }],
       annotations: { ft },
+      images: {},
+      bookmarks: [],
     }
     const out = await exportPdf(doc, new Map([['s1', { bytes }]]))
 
@@ -212,5 +218,134 @@ describe('pdf engine + writer', () => {
     // Plain WinAnsi text keeps the standard Helvetica.
     const out2 = await exportPdf({ ...doc, annotations: { ft: { ...ft, text: 'Olá, ação €' } } }, new Map([['s1', { bytes }]]))
     expect(new TextDecoder('latin1').decode(out2)).not.toContain('Noto')
+  })
+})
+
+// 1x1 red PNG.
+const PNG = Uint8Array.from(
+  atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFBQIAX8jx0gAAAABJRU5ErkJggg=='),
+  (c) => c.charCodeAt(0),
+)
+const model = (pages: DocumentModel['pages'], extra: Partial<DocumentModel> = {}): DocumentModel => ({
+  id: 'd',
+  title: 't',
+  sources: { s1: { id: 's1', name: 'a.pdf' } },
+  pages,
+  annotations: {},
+  images: {},
+  bookmarks: [],
+  ...extra,
+})
+const pg = (id: string, sourceIndex: number, w = 600, h = 800) => ({ id, sourceId: 's1', sourceIndex, width: w, height: h, rotation: 0 as const })
+
+describe('V1 export/import', () => {
+  it('round-trips notes with replies, images, bookmarks and blank pages; subset export', async () => {
+    const bytes = await makeSource()
+    const note: Annotation = {
+      ...base,
+      id: 'n',
+      pageId: 'p0',
+      type: 'note',
+      at: { x: 40, y: 40 },
+      note: 'Revisar',
+      replies: [
+        { id: 'r1', text: 'Ok', createdAt: t, author: 'Ana' },
+        { id: 'r2', text: 'Feito', createdAt: t + 1 },
+      ],
+    }
+    const img: Annotation = { ...base, id: 'i', pageId: 'p2', type: 'image', kind: 'signature', rect: { x: 10, y: 10, width: 50, height: 20 }, imageId: 'png1' }
+    const doc = model(
+      [pg('p0', 0), { id: 'b', sourceId: BLANK_SOURCE, sourceIndex: 0, width: 200, height: 300, rotation: 0 }, pg('p2', 2, 400, 300)],
+      {
+        annotations: { n: note, i: img },
+        images: { png1: { id: 'png1', mime: 'image/png', data: PNG, width: 1, height: 1 } },
+        bookmarks: [{ id: 'bm', pageId: 'p2', title: 'Assinatura' }],
+      },
+    )
+    const out = await exportPdf(doc, new Map([['s1', { bytes }]]))
+
+    const res = await loadPdf(out)
+    expect(res.pages[1]).toEqual({ width: 200, height: 300, rotation: 0 })
+    expect(await res.getAnnotations(0, 'p0')).toEqual([{ ...note, importedFrom: expect.anything() }])
+    expect(await res.getAnnotations(2, 'p2')).toEqual([{ ...img, importedFrom: expect.anything() }])
+    const extras = await res.getAtelierExtras()
+    expect(extras.images).toHaveLength(1)
+    expect([...extras.images[0]!.data]).toEqual([...PNG])
+    expect(extras.bookmarks).toEqual([{ pageIndex: 2, title: 'Assinatura' }])
+    expect(await res.getOutline()).toEqual([]) // our group is not a "real" outline
+    await res.destroy()
+
+    // Standard structure for other readers: /Text note + 2 hidden /Text replies pointing at it; /Stamp with /AP.
+    const raw = await getDocument({ data: out.slice() }).promise
+    const p1 = (await (await raw.getPage(1)).getAnnotations({ intent: 'any' })) as any[]
+    const parent = p1.find((a) => !a.inReplyTo)
+    expect(p1.filter((a) => a.inReplyTo === parent.id).map((a) => a.contentsObj.str)).toEqual(['Ok', 'Feito'])
+    const p3 = (await (await raw.getPage(3)).getAnnotations()) as any[]
+    expect(p3.map((a) => [a.subtype, a.hasAppearance])).toEqual([['Stamp', true]])
+    await raw.loadingTask.destroy()
+
+    // Subset export (extract/split): only p2, with its annotation and bookmark.
+    const sub = await exportPdf(doc, new Map([['s1', { bytes }]]), { pageIds: ['p2'] })
+    const one = await loadPdf(sub)
+    expect(one.pageCount).toBe(1)
+    expect((await one.getAnnotations(0, 'x')).map((a) => a.type)).toEqual(['image'])
+    expect((await one.getAtelierExtras()).bookmarks).toEqual([{ pageIndex: 0, title: 'Assinatura' }])
+    await one.destroy()
+  })
+
+  it('keeps foreign stamps and hidden annotations, imports foreign reply threads once', async () => {
+    const src = await PDFDocument.create()
+    const page = src.addPage([600, 800])
+    const ctx = src.context
+    const stamp = ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Stamp', Rect: [10, 10, 60, 60], Name: 'Approved' }))
+    const hidden = ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Square', Rect: [300, 300, 350, 350], F: 2 }))
+    const square = ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Square', Rect: [100, 100, 200, 150], C: [1, 0, 0] }))
+    const reply = ctx.register(ctx.obj({ Type: 'Annot', Subtype: 'Text', Rect: [100, 100, 120, 120], IRT: square, RT: 'R', Contents: PDFString.of('foreign reply') }))
+    for (const r of [stamp, hidden, square, reply]) page.node.addAnnot(r)
+    const bytes = await src.save()
+
+    const s = await loadPdf(bytes)
+    const anns = await s.getAnnotations(0, 'p0')
+    await s.destroy()
+    expect(anns.map((a) => [a.type, a.replies?.map((r) => r.text)])).toEqual([['rect', ['foreign reply']]])
+
+    const out = await exportPdf(model([pg('p0', 0)], { annotations: Object.fromEntries(anns.map((a) => [a.id, a])) }), new Map([['s1', { bytes }]]))
+    const raw = await getDocument({ data: out.slice() }).promise
+    const list = (await (await raw.getPage(1)).getAnnotations({ intent: 'any' })) as any[]
+    expect(list.map((a) => a.subtype).sort()).toEqual(['Square', 'Square', 'Stamp', 'Text'])
+    expect(list.filter((a) => a.subtype === 'Text').map((a) => a.contentsObj.str)).toEqual(['foreign reply'])
+    await raw.loadingTask.destroy()
+  })
+
+  it('preserves the source outline across reorder and page removal', async () => {
+    const src = await PDFDocument.create()
+    for (let i = 0; i < 3; i++) src.addPage([300, 300])
+    const ctx = src.context
+    const pages = src.getPages().map((p) => p.ref)
+    const [root, ch1, ch2, sec] = [ctx.nextRef(), ctx.nextRef(), ctx.nextRef(), ctx.nextRef()]
+    ctx.assign(ch1, ctx.obj({ Title: PDFString.of('Ch1'), Parent: root, Next: ch2, Dest: [pages[0]!, PDFName.of('Fit')] }))
+    ctx.assign(sec, ctx.obj({ Title: PDFString.of('Sec'), Parent: ch2, A: { S: 'GoTo', D: [pages[1]!, PDFName.of('XYZ'), 0, 300, 0] } }))
+    ctx.assign(ch2, ctx.obj({ Title: PDFString.of('Ch2'), Parent: root, Prev: ch1, First: sec, Last: sec, Count: 1, Dest: [pages[2]!, PDFName.of('Fit')] }))
+    ctx.assign(root, ctx.obj({ Type: 'Outlines', First: ch1, Last: ch2, Count: 2 }))
+    src.catalog.set(PDFName.of('Outlines'), root)
+    const bytes = await src.save()
+
+    const outline = async (pages: DocumentModel['pages']) => {
+      const out = await exportPdf(model(pages), new Map([['s1', { bytes }]]))
+      const res = await loadPdf(out)
+      try {
+        return await res.getOutline()
+      } finally {
+        await res.destroy()
+      }
+    }
+    expect(await outline([pg('c', 2, 300, 300), pg('a', 0, 300, 300), pg('b', 1, 300, 300)])).toEqual([
+      { title: 'Ch1', pageIndex: 1, children: [] },
+      { title: 'Ch2', pageIndex: 0, children: [{ title: 'Sec', pageIndex: 2, children: [] }] },
+    ])
+    expect(await outline([pg('a', 0, 300, 300), pg('c', 2, 300, 300)])).toEqual([
+      { title: 'Ch1', pageIndex: 0, children: [] },
+      { title: 'Ch2', pageIndex: 1, children: [] },
+    ])
   })
 })

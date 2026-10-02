@@ -1,4 +1,4 @@
-import type { Annotation, Rect, Rotation } from '@pdf-atelier/core'
+import type { Annotation, ImageAsset, Rect, Rotation } from '@pdf-atelier/core'
 
 /** A parsed PDF file. Wraps PDF.js; no PDF.js types leak out of this package. */
 export interface PdfSource {
@@ -16,6 +16,12 @@ export interface PdfSource {
   search(query: string, opts?: { caseSensitive?: boolean; signal?: AbortSignal }): AsyncIterable<SearchHit>
   /** Existing annotations converted to the domain model (unsupported types skipped). */
   getAnnotations(index: number, pageId: string): Promise<Annotation[]>
+  /**
+   * PDF Atelier data that is not per page: image bytes used by imported image annotations (add them to
+   * DocumentModel.images) and our bookmarks (pageIndex of this source; map to page ids).
+   */
+  getAtelierExtras(): Promise<{ images: ImageAsset[]; bookmarks: { pageIndex: number; title: string }[] }>
+  /** The file's own outline (our bookmarks group excluded). */
   getOutline(): Promise<OutlineItem[]>
   destroy(): Promise<void>
 }

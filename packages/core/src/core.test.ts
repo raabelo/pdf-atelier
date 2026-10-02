@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   applyChange,
+  BLANK_SOURCE,
+  collectClipboard,
   canRedo,
   canUndo,
   createDocument,
@@ -107,5 +109,56 @@ describe('geometry', () => {
 
   it('90° maps top-left to top-right', () => {
     expect(pageToView({ x: 0, y: 0 }, { width: 600, height: 800 }, 90, 1)).toEqual({ x: 800, y: 0 })
+  })
+})
+
+describe('V1 ops', () => {
+  const apply = (d: DocumentModel, fn: (d: import('immer').Draft<DocumentModel>) => void) =>
+    applyChange(createHistory(d), 'x', fn).present
+
+  it('duplicate, clipboard paste, style and replies', () => {
+    let d = doc()
+    const p0 = d.pages[0]!.id
+    const p1 = d.pages[1]!.id
+    const a = { ...ink('a', p0), replies: [{ id: 'r', text: 'hi', createdAt: 0 }] }
+    d = apply(d, (x) => docOps.addAnnotations(x, [a]))
+    let dup: string[] = []
+    d = apply(d, (x) => void (dup = docOps.duplicateAnnotations(x, ['a'], { x: 10, y: 5 })))
+    const copy = d.annotations[dup[0]!]!
+    expect(copy.type === 'ink' && copy.paths[0]![0]).toEqual({ x: 11, y: 6 })
+    expect(copy.replies![0]!.id).not.toBe('r')
+
+    const clip = collectClipboard(d, ['a'])
+    let pasted: string[] = []
+    d = apply(d, (x) => void (pasted = docOps.pasteAnnotations(x, clip, p1, { x: 0, y: 0 })))
+    expect(d.annotations[pasted[0]!]!.pageId).toBe(p1)
+
+    d = apply(d, (x) => docOps.setStyle(x, ['a'], { color: '#f00' }))
+    expect(d.annotations.a!.style).toMatchObject({ color: '#f00', strokeWidth: 1 })
+
+    d = apply(d, (x) => docOps.addReply(x, 'a', { id: 'r2', text: 'yo', createdAt: 1 }))
+    d = apply(d, (x) => docOps.updateReply(x, 'a', 'r2', 'yo!'))
+    d = apply(d, (x) => docOps.removeReply(x, 'a', 'r'))
+    expect(d.annotations.a!.replies).toEqual([{ id: 'r2', text: 'yo!', createdAt: 1 }])
+  })
+
+  it('duplicate/blank pages and bookmarks', () => {
+    let d = doc(2)
+    const [p0, p1] = d.pages.map((p) => p.id)
+    d = apply(d, (x) => docOps.addAnnotations(x, [ink('a', p0!)]))
+    let copies: string[] = []
+    d = apply(d, (x) => void (copies = docOps.duplicatePages(x, [p0!])))
+    expect(d.pages.map((p) => p.id)).toEqual([p0, copies[0], p1])
+    expect(Object.values(d.annotations).filter((a) => a.pageId === copies[0])).toHaveLength(1)
+
+    d = apply(d, (x) => void docOps.insertBlankPages(x, 0, 2, { width: 100, height: 200 }))
+    expect(d.pages.slice(0, 2).map((p) => [p.sourceId, p.width])).toEqual([[BLANK_SOURCE, 100], [BLANK_SOURCE, 100]])
+
+    d = apply(d, (x) => void docOps.addBookmark(x, p1!, 'B'))
+    const bm = d.bookmarks[0]!.id
+    d = apply(d, (x) => docOps.renameBookmark(x, bm, 'C'))
+    expect(d.bookmarks[0]!.title).toBe('C')
+    d = apply(d, (x) => docOps.removePages(x, [p1!]))
+    expect(d.bookmarks).toEqual([])
   })
 })

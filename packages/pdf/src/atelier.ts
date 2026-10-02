@@ -1,10 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- untrusted JSON / pdf-lib literal dicts, validated at runtime */
 import {
+  decodePDFRawStream,
   degrees,
   PDFDict,
   PDFDocument,
   PDFHexString,
   PDFName,
+  PDFNumber,
+  PDFRawStream,
   PDFRef,
   PDFString,
   StandardFonts,
@@ -12,11 +15,14 @@ import {
   type PDFPage,
 } from '@cantoo/pdf-lib'
 import fontkit from '@cantoo/fontkit'
-import type { Annotation, DocumentModel, Point, Rect } from '@pdf-atelier/core'
+import { BLANK_SOURCE, NOTE_SIZE, type Annotation, type DocumentModel, type ImageAsset, type Point, type Rect, type Reply } from '@pdf-atelier/core'
 import { loadNotoSans, pdfFontkit } from './fonts.ts'
+import { readOutline, writeOutline, type OutlineNode } from './outline.ts'
 
 /** Private key holding the domain annotation JSON, so our annotations round-trip without loss. */
 const ATELIER_KEY = 'PDFAtelier'
+/** Private key on our image /Stamp: stream with the original image bytes (byte-exact round-trip). */
+const IMAGE_KEY = 'PDFAtelierImage'
 
 const SUBTYPES: Record<Annotation['type'], string> = {
   highlight: 'Highlight',
@@ -28,59 +34,112 @@ const SUBTYPES: Record<Annotation['type'], string> = {
   line: 'Line',
   arrow: 'Line',
   freetext: 'FreeText',
+  note: 'Text',
+  image: 'Stamp',
 }
-const SUPPORTED = new Set(Object.values(SUBTYPES))
+// Foreign /Stamp annotations are not ours to edit: only Stamps carrying our JSON are owned.
+const SUPPORTED = new Set(Object.values(SUBTYPES).filter((s) => s !== 'Stamp'))
 
-/** Annotation subtypes the app owns: imported into the model, hidden from the canvas, rewritten on export. */
+/** Annotation subtypes the app imports into its model (foreign ones, when visible). */
 export function isSupportedSubtype(subtype: unknown): boolean {
   return typeof subtype === 'string' && SUPPORTED.has(subtype)
 }
 
+/** /F bits that make an annotation invisible to the user: Invisible | Hidden | NoView. Such foreign ones are kept as-is. */
+export const HIDDEN_FLAGS = 1 | 2 | 32
+
 const refKey = (ref: PDFRef) => (ref.generationNumber === 0 ? `${ref.objectNumber}R` : `${ref.objectNumber}R${ref.generationNumber}`)
 
+export interface AtelierData {
+  /** Our annotations keyed by pdf.js-style object id ("12R"). */
+  annotations: Map<string, Annotation>
+  images: ImageAsset[]
+  /** Our bookmarks group, as page indices of this file. */
+  bookmarks: { pageIndex: number; title: string }[]
+  /** Top-level outline index of our bookmarks group (hidden from getOutline), or null. */
+  bookmarkGroup: number | null
+}
+
 /**
- * Reads /PDFAtelier JSON from every annotation, keyed by pdf.js-style object id ("12R").
- * pdf.js does not expose custom keys, hence the second parser. The JSON comes from an untrusted file: validated.
+ * Reads PDF Atelier's private data: /PDFAtelier JSON of every annotation, original image bytes and the
+ * bookmarks outline group. pdf.js does not expose custom keys, hence the second parser.
+ * Everything comes from an untrusted file and is validated.
  */
-export async function readAtelierAnnotations(bytes: Uint8Array, password?: string): Promise<Map<string, Annotation>> {
+export async function readAtelierData(bytes: Uint8Array, password?: string): Promise<AtelierData> {
   // Without the password, encrypted strings stay ciphertext, fail JSON.parse and fall back to the standard fields.
   const doc = await PDFDocument.load(bytes, { ...(password ? { password } : { ignoreEncryption: true }), updateMetadata: false })
-  const out = new Map<string, Annotation>()
+  const annotations = new Map<string, Annotation>()
+  const images = new Map<string, ImageAsset>()
   for (const page of doc.getPages()) {
-    const annots = page.node.Annots()
-    if (!annots) continue
-    for (let i = 0; i < annots.size(); i++) {
-      const ref = annots.get(i)
+    for (const ref of page.node.Annots()?.asArray() ?? []) {
       if (!(ref instanceof PDFRef)) continue
-      const raw = doc.context.lookup(ref, PDFDict).get(PDFName.of(ATELIER_KEY))
+      const dict = doc.context.lookup(ref)
+      if (!(dict instanceof PDFDict)) continue
+      const raw = dict.get(PDFName.of(ATELIER_KEY))
       if (!(raw instanceof PDFHexString || raw instanceof PDFString)) continue
       try {
         const ann: unknown = JSON.parse(raw.decodeText())
-        if (isValidAnnotation(ann)) out.set(refKey(ref), ann)
+        if (!isValidAnnotation(ann)) continue
+        if (ann.type === 'image' && !images.has(ann.imageId)) {
+          const img = readImage(doc, dict.get(PDFName.of(IMAGE_KEY)), ann.imageId)
+          if (!img) continue // an image annotation without its bytes cannot be drawn
+          images.set(img.id, img)
+        }
+        annotations.set(refKey(ref), ann)
       } catch {
-        // Malformed JSON: fall back to the standard PDF fields.
+        // Malformed JSON / stream: fall back to the standard PDF fields.
       }
     }
   }
-  return out
+  const outline = readOutline(doc)
+  const group = outline.findIndex((n) => n.marker)
+  const bookmarks = (outline[group]?.children ?? []).flatMap((n) =>
+    n.pageIndex !== null ? [{ pageIndex: n.pageIndex, title: n.title }] : [],
+  )
+  return { annotations, images: [...images.values()], bookmarks, bookmarkGroup: group === -1 ? null : group }
+}
+
+/** Kept for callers that only need the annotations. */
+export async function readAtelierAnnotations(bytes: Uint8Array, password?: string): Promise<Map<string, Annotation>> {
+  return (await readAtelierData(bytes, password)).annotations
+}
+
+function readImage(doc: PDFDocument, ref: unknown, id: string): ImageAsset | null {
+  const stream = ref instanceof PDFRef ? doc.context.lookup(ref) : null
+  if (!(stream instanceof PDFRawStream)) return null
+  const meta = (k: string) => stream.dict.get(PDFName.of(k))
+  const mime = meta('PDFAtelierMime')
+  const [w, h] = [meta('PDFAtelierWidth'), meta('PDFAtelierHeight')]
+  if (!(mime instanceof PDFName) || !(w instanceof PDFNumber) || !(h instanceof PDFNumber)) return null
+  const data = decodePDFRawStream(stream).decode()
+  const type = mime.decodeText()
+  const png = data[0] === 0x89 && data[1] === 0x50 && data[2] === 0x4e && data[3] === 0x47
+  const jpg = data[0] === 0xff && data[1] === 0xd8
+  if (type === 'image/png' && png) return { id, mime: type, data: new Uint8Array(data), width: w.asNumber(), height: h.asNumber() }
+  if (type === 'image/jpeg' && jpg) return { id, mime: type, data: new Uint8Array(data), width: w.asNumber(), height: h.asNumber() }
+  return null
 }
 
 const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+const str = (v: unknown): v is string => typeof v === 'string'
 const isPoint = (p: any): p is Point => p && num(p.x) && num(p.y)
 const isRect = (r: any): r is Rect => isPoint(r) && num((r as any).width) && num((r as any).height)
+const isReply = (r: any): r is Reply =>
+  r && str(r.id) && str(r.text) && num(r.createdAt) && (r.author === undefined || str(r.author))
 
 function isValidAnnotation(a: any): a is Annotation {
-  if (!a || typeof a !== 'object' || typeof a.id !== 'string' || !(a.type in SUBTYPES)) return false
+  if (!a || typeof a !== 'object' || !str(a.id) || !str(a.type) || !(a.type in SUBTYPES)) return false
   const s = a.style
-  if (!s || typeof s.color !== 'string' || !num(s.strokeWidth) || !num(s.opacity)) return false
-  if (s.fill !== null && typeof s.fill !== 'string') return false
+  if (!s || !str(s.color) || !num(s.strokeWidth) || !num(s.opacity)) return false
+  if (s.fill !== null && !str(s.fill)) return false
   if (!num(a.createdAt) || !num(a.updatedAt)) return false
-  if (a.note !== undefined && typeof a.note !== 'string') return false
+  if (a.note !== undefined && !str(a.note)) return false
+  if (a.replies !== undefined && !(Array.isArray(a.replies) && a.replies.every(isReply))) return false
   switch (a.type as Annotation['type']) {
     case 'highlight':
     case 'underline':
     case 'strikeout':
-      return Array.isArray(a.rects) && a.rects.every(isRect) && typeof a.text === 'string'
+      return Array.isArray(a.rects) && a.rects.every(isRect) && str(a.text)
     case 'ink':
       return Array.isArray(a.paths) && a.paths.every((p: unknown) => Array.isArray(p) && p.every(isPoint))
     case 'rect':
@@ -90,27 +149,40 @@ function isValidAnnotation(a: any): a is Annotation {
     case 'arrow':
       return isPoint(a.from) && isPoint(a.to)
     case 'freetext':
-      return isRect(a.rect) && typeof a.text === 'string' && num(a.fontSize)
+      return isRect(a.rect) && str(a.text) && num(a.fontSize)
+    case 'note':
+      return isPoint(a.at)
+    case 'image':
+      return isRect(a.rect) && str(a.imageId) && ['image', 'signature', 'stamp'].includes(a.kind)
   }
 }
 
 /**
  * Builds the output PDF from the model: pages copied in order with their rotation, then annotations.
- * The model is the source of truth for supported annotation types: every such annotation already in the
- * sources is dropped and the model's annotations are written (standard /Annot + /AP + /PDFAtelier JSON).
+ * The model is the source of truth for owned annotations (see ownsAnnot): those already in the sources are
+ * dropped and the model's annotations are written (standard /Annot + /AP + /PDFAtelier JSON). Annotations we
+ * don't own (links, foreign stamps, hidden ones...) are copied untouched. Outlines are rebuilt (see below).
+ * `pageIds` exports only those pages (extract/split), keeping document order.
  */
 export async function exportPdf(
   doc: DocumentModel,
   sources: ReadonlyMap<string, { bytes: Uint8Array; password?: string }>,
+  opts: { pageIds?: string[]; bookmarksTitle?: string } = {},
 ): Promise<Uint8Array> {
   const out = await PDFDocument.create()
   out.registerFontkit(pdfFontkit)
   let password: string | undefined
+  const only = opts.pageIds && new Set(opts.pageIds)
+  const pages = only ? doc.pages.filter((p) => only.has(p.id)) : doc.pages
+  if (!pages.length) throw new Error('Nothing to export: no pages selected')
 
   // One copyPages call per source so shared resources (fonts, images) are copied once.
   const wanted = new Map<string, number[]>()
-  for (const p of doc.pages) (wanted.get(p.sourceId) ?? wanted.set(p.sourceId, []).get(p.sourceId)!).push(p.sourceIndex)
+  for (const p of pages) {
+    if (p.sourceId !== BLANK_SOURCE) (wanted.get(p.sourceId) ?? wanted.set(p.sourceId, []).get(p.sourceId)!).push(p.sourceIndex)
+  }
   const copied = new Map<string, PDFPage[]>()
+  const srcDocs = new Map<string, PDFDocument>()
   for (const [sourceId, indices] of wanted) {
     const source = sources.get(sourceId)
     if (!source) throw new Error(`Missing bytes for source ${sourceId}`)
@@ -118,27 +190,90 @@ export async function exportPdf(
     password ??= source.password
     for (const i of new Set(indices)) dropOwnedAnnots(src, src.getPage(i))
     copied.set(sourceId, await out.copyPages(src, indices))
+    srcDocs.set(sourceId, src)
   }
 
   const byPage = new Map<string, Annotation[]>()
   for (const a of Object.values(doc.annotations)) (byPage.get(a.pageId) ?? byPage.set(a.pageId, []).get(a.pageId)!).push(a)
 
   const fontsFor = textFonts(out)
-  for (const p of doc.pages) {
-    const page = copied.get(p.sourceId)!.shift()!
-    out.addPage(page)
+  const imagesFor = imageXObjects(out, doc)
+  const firstOut = new Map<string, number>() // `${sourceId}:${sourceIndex}` -> first output page index
+  const outIndex = new Map<string, number>() // pageId -> output page index
+  for (const [i, p] of pages.entries()) {
+    const page = p.sourceId === BLANK_SOURCE ? out.addPage([p.width, p.height]) : out.addPage(copied.get(p.sourceId)!.shift()!)
     page.setRotation(degrees(p.rotation))
+    outIndex.set(p.id, i)
+    if (!firstOut.has(`${p.sourceId}:${p.sourceIndex}`)) firstOut.set(`${p.sourceId}:${p.sourceIndex}`, i)
     for (const a of byPage.get(p.id) ?? []) {
       if (a.type === 'ink' && !a.paths.some((path) => path.length)) continue
+      const image = a.type === 'image' ? await imagesFor(a.imageId) : undefined
+      if (a.type === 'image' && !image) continue // image bytes missing from the model: nothing to draw
       const fonts = a.type === 'freetext' ? await fontsFor(a.text) : []
-      page.node.addAnnot(out.context.register(buildAnnot(out, page, a, fonts)))
+      const { dict, rect } = buildAnnot(out, page, a, fonts, image)
+      const ref = out.context.register(dict)
+      page.node.addAnnot(ref)
+      for (const r of a.replies ?? []) page.node.addAnnot(out.context.register(buildReply(out, ref, rect, r)))
     }
   }
+
+  // copyPages drops /Outlines: rebuild each source's outline remapped to the output pages (items whose page is
+  // gone are dropped unless they still have children), then our bookmarks group.
+  const remap = (sourceId: string, list: OutlineNode[]): OutlineNode[] =>
+    list.flatMap((n) => {
+      const children = remap(sourceId, n.children)
+      const pageIndex = n.pageIndex === null ? null : (firstOut.get(`${sourceId}:${n.pageIndex}`) ?? null)
+      return pageIndex !== null || children.length ? [{ ...n, pageIndex, children }] : []
+    })
+  const nodes = [...srcDocs].flatMap(([sourceId, src]) => remap(sourceId, readOutline(src).filter((n) => !n.marker)))
+  const marks = doc.bookmarks.filter((b) => outIndex.has(b.pageId))
+  if (marks.length) {
+    nodes.push({
+      title: opts.bookmarksTitle ?? 'Favoritos',
+      pageIndex: null,
+      view: [],
+      marker: true,
+      children: marks.map((b) => ({ title: b.title, pageIndex: outIndex.get(b.pageId)!, view: [], children: [] })),
+    })
+  }
+  writeOutline(out, nodes)
+
   // Saving must never silently strip protection: when a source was password-protected, the output is encrypted
   // with that password as both user and owner password (AES-256, the library default). With several protected
   // sources, the first one's password is used.
   if (password) out.encrypt({ userPassword: password, ownerPassword: password })
   return out.save()
+}
+
+interface ImageRefs {
+  xobject: PDFRef
+  raw: PDFRef
+}
+
+/** Embeds each image once per export: drawable XObject + raw original bytes for round-trip. */
+function imageXObjects(out: PDFDocument, doc: DocumentModel) {
+  const cache = new Map<string, Promise<ImageRefs | undefined>>()
+  return (id: string) => {
+    let hit = cache.get(id)
+    if (!hit) {
+      const asset = doc.images[id]
+      hit = !asset
+        ? Promise.resolve(undefined)
+        : (asset.mime === 'image/png' ? out.embedPng(asset.data) : out.embedJpg(asset.data)).then((img) => ({
+            xobject: img.ref,
+            // ponytail: original bytes stored next to the drawable copy (~2x image size) for byte-exact round-trip.
+            raw: out.context.register(
+              out.context.stream(asset.data, {
+                PDFAtelierMime: PDFName.of(asset.mime),
+                PDFAtelierWidth: asset.width,
+                PDFAtelierHeight: asset.height,
+              }),
+            ),
+          }))
+      cache.set(id, hit)
+    }
+    return hit
+  }
 }
 
 interface TextFont {
@@ -194,26 +329,42 @@ function textFonts(out: PDFDocument) {
   }
 }
 
+/**
+ * Whether the app owns this annotation (imports it, hides it from the canvas, rewrites it on export):
+ * - anything carrying our JSON;
+ * - a reply (/Text with /IRT) whose parent on the same page is owned;
+ * - otherwise a supported subtype that is visible (hidden foreign annotations are kept untouched).
+ * engine.ts applies the same rule to pdf.js data; keep both in sync.
+ */
+function ownsAnnot(dict: PDFDict, onPage: Map<string, PDFDict>, depth = 0): boolean {
+  if (dict.has(PDFName.of(ATELIER_KEY))) return true
+  const subtype = dict.get(PDFName.of('Subtype'))
+  const name = subtype instanceof PDFName ? subtype.decodeText() : null
+  const irt = dict.get(PDFName.of('IRT'))
+  if (name === 'Text' && irt instanceof PDFRef) {
+    const parent = onPage.get(refKey(irt))
+    return !!parent && depth < 8 && ownsAnnot(parent, onPage, depth + 1)
+  }
+  const flags = dict.get(PDFName.of('F'))
+  return isSupportedSubtype(name) && !((flags instanceof PDFNumber ? flags.asNumber() : 0) & HIDDEN_FLAGS)
+}
+
 function dropOwnedAnnots(src: PDFDocument, page: PDFPage) {
   const annots = page.node.Annots()
   if (!annots) return
-  const removed = new Set<string>()
-  const keep: PDFRef[] = []
-  const entries = annots.asArray().map((ref) => ({ ref, dict: src.context.lookupMaybe(ref, PDFDict) }))
-  for (const { ref, dict } of entries) {
-    const subtype = dict?.get(PDFName.of('Subtype'))
-    if (isSupportedSubtype(subtype instanceof PDFName ? subtype.decodeText() : null)) {
-      if (ref instanceof PDFRef) removed.add(refKey(ref))
-    }
-  }
-  for (const { ref, dict } of entries) {
-    if (!(ref instanceof PDFRef) || removed.has(refKey(ref))) continue
+  const entries = annots.asArray().flatMap((ref) => {
+    const dict = ref instanceof PDFRef ? src.context.lookup(ref) : ref
+    return ref instanceof PDFRef && dict instanceof PDFDict ? [{ ref, dict }] : []
+  })
+  const onPage = new Map(entries.map((e) => [refKey(e.ref), e.dict]))
+  const removed = new Set(entries.filter((e) => ownsAnnot(e.dict, onPage)).map((e) => refKey(e.ref)))
+  const keep = entries.filter(({ ref, dict }) => {
+    if (removed.has(refKey(ref))) return false
     // Popups belong to the markup annotation they annotate.
-    const parent = dict?.get(PDFName.of('Parent'))
-    if (parent instanceof PDFRef && removed.has(refKey(parent))) continue
-    keep.push(ref)
-  }
-  page.node.set(PDFName.of('Annots'), src.context.obj(keep))
+    const parent = dict.get(PDFName.of('Parent'))
+    return !(parent instanceof PDFRef && removed.has(refKey(parent)))
+  })
+  page.node.set(PDFName.of('Annots'), src.context.obj(keep.map((e) => e.ref)))
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -229,7 +380,25 @@ function rgb(color: string | null): [number, number, number] {
   return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255]
 }
 
-function buildAnnot(out: PDFDocument, page: PDFPage, a: Annotation, fonts: TextFont[]): PDFDict {
+/** Reply as Acrobat writes it: /Text in reply to the parent, not drawn (NoView), listed in comment panes. */
+function buildReply(out: PDFDocument, parent: PDFRef, rect: Box, r: Reply): PDFDict {
+  return out.context.obj({
+    Type: 'Annot',
+    Subtype: 'Text',
+    Rect: rect,
+    F: 32, // NoView
+    IRT: parent,
+    RT: 'R',
+    Name: 'Comment',
+    Open: false,
+    NM: PDFHexString.fromText(r.id),
+    M: PDFString.fromDate(new Date(r.createdAt)),
+    Contents: PDFHexString.fromText(r.text),
+    ...(r.author && { T: PDFHexString.fromText(r.author) }),
+  } as Record<string, any>) as PDFDict
+}
+
+function buildAnnot(out: PDFDocument, page: PDFPage, a: Annotation, fonts: TextFont[], image?: ImageRefs): { dict: PDFDict; rect: Box } {
   const cb = page.getCropBox()
   const pt = (p: Point): [number, number] => [cb.x + p.x, cb.y + cb.height - p.y]
   const box = (r: Rect): Box => {
@@ -345,6 +514,26 @@ function buildAnnot(out: PDFDocument, page: PDFPage, a: Annotation, fonts: TextF
       ].join('\n')
       break
     }
+    case 'note': {
+      // Sticky note icon: filled square with a dark border and three text lines.
+      rect = box({ ...a.at, width: NOTE_SIZE, height: NOTE_SIZE })
+      extra.Name = PDFName.of('Comment')
+      extra.Open = false
+      const [x, y, s] = [rect[0], rect[1], NOTE_SIZE]
+      body = [
+        `${f(r)} ${f(g)} ${f(b)} rg 0.2 0.2 0.2 RG 0.8 w ${f(x + 0.5)} ${f(y + 0.5)} ${f(s - 1)} ${f(s - 1)} re B`,
+        ...[0.7, 0.5, 0.3].map((k) => `0.6 w ${f(x + 4)} ${f(y + s * k)} m ${f(x + s - 4)} ${f(y + s * k)} l S`),
+      ].join('\n')
+      break
+    }
+    case 'image': {
+      rect = box(a.rect)
+      extra.Name = PDFName.of(a.kind === 'stamp' ? 'Draft' : 'Image')
+      extra[IMAGE_KEY] = image!.raw
+      resources.XObject = { Im0: image!.xobject }
+      body = `q ${f(rect[2] - rect[0])} 0 0 ${f(rect[3] - rect[1])} ${f(rect[0])} ${f(rect[1])} cm /Im0 Do Q`
+      break
+    }
   }
 
   const ap = out.context.stream(`/G0 gs\n${body}`, {
@@ -354,7 +543,7 @@ function buildAnnot(out: PDFDocument, page: PDFPage, a: Annotation, fonts: TextF
     Resources: resources,
   })
   const contents = a.type === 'freetext' ? a.text : a.note
-  return out.context.obj({
+  const dict = out.context.obj({
     Type: 'Annot',
     Subtype: SUBTYPES[a.type],
     Rect: rect,
@@ -369,6 +558,7 @@ function buildAnnot(out: PDFDocument, page: PDFPage, a: Annotation, fonts: TextF
     AP: { N: out.context.register(ap) },
     [ATELIER_KEY]: PDFHexString.fromText(JSON.stringify(stripImport(a))),
   } as Record<string, any>) as PDFDict
+  return { dict, rect }
 }
 
 function stripImport(a: Annotation): Annotation {
