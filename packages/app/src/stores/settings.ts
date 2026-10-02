@@ -6,7 +6,14 @@ export type Theme = 'light' | 'dark' | 'system'
 export interface Settings {
   theme: Theme
   locale: 'pt-BR' | 'en'
-  tts: { lang: string; voiceId: string | null; rate: number; autoRead: boolean }
+  tts: {
+    lang: string
+    voiceId: string | null
+    rate: number
+    autoRead: boolean
+    /** Pick the reading language from the text (franc) instead of `lang`. */
+    autoDetect: boolean
+  }
 }
 
 const defaults: Settings = {
@@ -15,7 +22,7 @@ const defaults: Settings = {
     typeof navigator !== 'undefined' && navigator.language.toLowerCase().startsWith('pt')
       ? 'pt-BR'
       : 'en',
-  tts: { lang: 'pt-BR', voiceId: null, rate: 1, autoRead: false },
+  tts: { lang: 'pt-BR', voiceId: null, rate: 1, autoRead: false, autoDetect: true },
 }
 
 interface SettingsStore extends Settings {

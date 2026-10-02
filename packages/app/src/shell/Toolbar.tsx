@@ -5,6 +5,11 @@ import {
   FolderOpen,
   Info,
   Highlighter,
+  ImagePlus,
+  Paintbrush,
+  Signature,
+  Stamp,
+  StickyNote,
   Minus,
   Monitor,
   Moon,
@@ -30,9 +35,12 @@ import { t, type MessageKey } from '../i18n/index.ts'
 import { useActiveDoc, useDocuments } from '../stores/documents.ts'
 import { useSettings } from '../stores/settings.ts'
 import { useUi, type Tool } from '../stores/ui.ts'
+import { PagesMenu } from '../sidebar/PagesMenu.tsx'
 import { Button } from '../ui/button.tsx'
 import { Separator, Slider } from '../ui/controls.tsx'
 import { IconButton, Popover } from '../ui/overlays.tsx'
+import { copyStyle, pasteStyle } from '../annotations/actions.ts'
+import { InsertDialogs } from '../annotations/InsertDialogs.tsx'
 
 const TOOLS: [Tool, LucideIcon][] = [
   ['select', MousePointer2],
@@ -45,6 +53,7 @@ const TOOLS: [Tool, LucideIcon][] = [
   ['ellipse', Circle],
   ['line', Minus],
   ['arrow', ArrowUpRight],
+  ['note', StickyNote],
 ]
 
 const COLORS = [
@@ -75,6 +84,7 @@ function StyleControls() {
   const tool = useUi((s) => s.tool)
   const styles = useUi((s) => s.styles)
   const selection = useUi((s) => s.selection)
+  const styleClip = useUi((s) => s.styleClipboard)
   const doc = useActiveDoc()
   const selected = selection.map((id) => doc?.history.present.annotations[id]).filter((a) => !!a)
   const type: AnnotationType = selected[0]?.type ?? (tool === 'select' ? 'rect' : tool)
@@ -180,6 +190,16 @@ function StyleControls() {
             onValueChange={([v]) => apply({ opacity: v! })}
           />
         </div>
+        {selected.length > 0 && (
+          <div className="flex gap-1">
+            <Button size="sm" variant="outline" onClick={copyStyle}>
+              <Paintbrush /> {t('cmd.edit.copyStyle')}
+            </Button>
+            <Button size="sm" variant="outline" onClick={pasteStyle} disabled={!styleClip}>
+              {t('cmd.edit.pasteStyle')}
+            </Button>
+          </div>
+        )}
       </div>
     </Popover>
   )
@@ -225,11 +245,31 @@ export function Toolbar() {
           <Icon />
         </IconButton>
       ))}
+      {(
+        [
+          ['tool.image', ImagePlus, 'tool.image'],
+          ['insert.signature', Signature, 'cmd.insert.signature'],
+          ['insert.stamp', Stamp, 'cmd.insert.stamp'],
+        ] as const
+      ).map(([id, Icon, label]) => (
+        <IconButton
+          key={id}
+          label={t(label)}
+          shortcut={formatKeys(id)}
+          disabled={noDoc}
+          onClick={() => runCommand(id)}
+        >
+          <Icon />
+        </IconButton>
+      ))}
       <StyleControls />
+      <InsertDialogs />
       <Separator vertical />
       <Cmd id="view.zoomOut" icon={ZoomOut} disabled={noDoc} />
       <Cmd id="view.zoomIn" icon={ZoomIn} disabled={noDoc} />
       <Cmd id="view.rotate" icon={RotateCw} disabled={noDoc} />
+      <Separator vertical />
+      <PagesMenu disabled={noDoc} />
       <div className="ml-auto" />
       <Cmd id="help.about" icon={Info} />
       <IconButton

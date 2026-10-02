@@ -25,7 +25,7 @@ const langName = (lang: string, locale: string) => {
 }
 
 export function TtsPanel() {
-  const { state, voices, current, installing } = useTts()
+  const { state, voices, current, installing, detected } = useTts()
   const tts = useSettings((s) => s.tts)
   const locale = useSettings((s) => s.locale)
   const setTts = useSettings((s) => s.setTts)
@@ -82,6 +82,18 @@ export function TtsPanel() {
           onValueChange={([r]) => setTts({ rate: r! })}
         />
       </div>
+      <label className="flex items-center justify-between gap-2">
+        <span>{t('tts.autoDetect')}</span>
+        <Switch
+          checked={tts.autoDetect}
+          onCheckedChange={(autoDetect) => setTts({ autoDetect })}
+        />
+      </label>
+      {tts.autoDetect && detected && state !== 'idle' && (
+        <p className="text-xs text-muted-foreground" role="status">
+          {t('tts.detected', { lang: `${langName(detected, locale)} (${detected})` })}
+        </p>
+      )}
       <label className="flex items-center justify-between gap-2">
         <span>{t('tts.autoRead')}</span>
         <Switch checked={tts.autoRead} onCheckedChange={(autoRead) => setTts({ autoRead })} />

@@ -4,6 +4,7 @@ import { t } from '../i18n/index.ts'
 import { activeDoc } from '../stores/documents.ts'
 import { useSettings } from '../stores/settings.ts'
 import { goToPage, notify, viewOf } from '../stores/ui.ts'
+import { detectLanguage } from './detect.ts'
 import { rangeAt, showSegment, textOfRange, type MappedText } from './highlight.ts'
 
 interface TtsStore {
@@ -13,6 +14,8 @@ interface TtsStore {
   current: { text: string; start: number; end: number } | null
   /** Piper download progress per voice id (0..1). */
   installing: Record<string, number>
+  /** Language picked by auto-detection for the current reading (null = configured language). */
+  detected: string | null
 }
 
 export const useTts = create<TtsStore>(() => ({
@@ -20,6 +23,7 @@ export const useTts = create<TtsStore>(() => ({
   voices: [],
   current: null,
   installing: {},
+  detected: null,
 }))
 
 let engine: Promise<TtsEngine> | null = null
@@ -68,8 +72,12 @@ let reading = 0
 
 async function speak(m: MappedText, follow: boolean): Promise<'ended' | 'stopped'> {
   const e = await getEngine()
-  const { lang, voiceId, rate } = useSettings.getState().tts
-  const voice = await e.resolveVoice(lang, voiceId ?? undefined)
+  const { lang: configured, voiceId, rate, autoDetect } = useSettings.getState().tts
+  const detected = autoDetect ? detectLanguage(m.text) : null
+  useTts.setState({ detected })
+  const lang = detected ?? configured
+  // The chosen voice only applies to the configured language; a detected one resolves its own.
+  const voice = await e.resolveVoice(lang, lang === configured ? (voiceId ?? undefined) : undefined)
   // First use of a Piper voice downloads it (user decision: on-demand download, stored locally).
   if (voice?.provider === 'piper' && !voice.installed) await installVoice(voice.id)
   return e.speak(m.text, {

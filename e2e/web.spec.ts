@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
-import { expect, test } from '@playwright/test'
+import { PDFDocument } from '@cantoo/pdf-lib'
+import { expect, test, type Page } from '@playwright/test'
 import { annotationRects, collectErrors, drawRect, dropPdf, makePdf } from './helpers'
 
 test('open, annotate, undo, save and reopen keeps annotations', async ({ page }) => {
@@ -82,4 +83,66 @@ test('print rasterizes every page and calls window.print', async ({ page }) => {
   await page.waitForFunction(() => (window as { printedPages?: number }).printedPages !== undefined)
   expect(await page.evaluate(() => (window as { printedPages?: number }).printedPages)).toBe(3)
   await expect(page.locator('#print-root')).toHaveCount(0) // cleaned up after printing
+})
+
+const noNativePickers = (page: Page) =>
+  page.addInitScript(() => {
+    delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker
+    delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker
+  })
+const thumbs = (page: Page) => page.getByRole('button', { name: /^(Page|Página) \d+$/ })
+async function pagesMenu(page: Page, item: RegExp) {
+  await page.getByRole('button', { name: /^(Pages|Páginas)$/ }).click()
+  await page.getByRole('menuitem', { name: item }).click()
+}
+
+test('blank page, duplicate and bookmark survive save and reopen', async ({ page }) => {
+  await noNativePickers(page)
+  const errors = collectErrors(page)
+  await page.goto('/')
+  await dropPdf(page, await makePdf(2), 'ops.pdf')
+  await pagesMenu(page, /Insert blank page|Inserir página em branco/)
+  await expect(thumbs(page)).toHaveCount(3)
+  await pagesMenu(page, /Duplicate pages|Duplicar páginas/)
+  await expect(thumbs(page)).toHaveCount(4)
+  await page.keyboard.press('Control+b')
+
+  const [download] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Control+s')])
+  await dropPdf(page, readFileSync((await download.path())!), 'ops-reopened.pdf')
+  await expect(page.getByRole('tab', { name: /ops-reopened\.pdf/ })).toBeVisible()
+  await expect(thumbs(page)).toHaveCount(4)
+  await page.getByRole('tab', { name: /^(Bookmarks|Favoritos)$/ }).click()
+  await expect(page.getByRole('list', { name: /Bookmarks|Favoritos/ }).getByRole('listitem')).toHaveCount(1)
+  expect(errors).toEqual([])
+})
+
+test('extracting one page downloads a 1-page PDF', async ({ page }) => {
+  await noNativePickers(page)
+  await page.goto('/')
+  await dropPdf(page, await makePdf(3), 'extract.pdf')
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    pagesMenu(page, /Extract pages|Extrair páginas/),
+  ])
+  const pdf = await PDFDocument.load(readFileSync((await download.path())!))
+  expect(pdf.getPageCount()).toBe(1)
+})
+
+test('regex search finds matches and highlights them in the text layer', async ({ page }) => {
+  await page.goto('/')
+  await dropPdf(page, await makePdf(3), 'search.pdf')
+  await page.keyboard.press('Control+f')
+  await page.getByLabel(/Regular expression|Expressão regular/).check()
+  await page.locator('#search-input').fill(String.raw`page \d`)
+  await page.locator('#search-input').press('Enter')
+  await expect(page.getByRole('status').filter({ hasText: /3 (results|resultados)/ })).toBeVisible()
+  await page.waitForFunction(() => (CSS.highlights.get('search')?.size ?? 0) > 0)
+})
+
+test('service worker registers for offline use', async ({ page }) => {
+  await page.goto('/')
+  const active = await page.evaluate(() =>
+    navigator.serviceWorker.ready.then((r) => r.active?.scriptURL ?? ''),
+  )
+  expect(active).toMatch(/sw\.js$/)
 })

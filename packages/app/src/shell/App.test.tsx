@@ -25,6 +25,7 @@ const platform: Platform = {
     fromDroppedFile: vi.fn(),
     save: vi.fn(),
     saveAs: vi.fn(),
+    exportFile: vi.fn(),
     openRecent: vi.fn(),
     listRecent: vi.fn(async () => [{ ref: 'r1', name: 'contrato.pdf', openedAt: 1 }]),
     removeRecent: vi.fn(),

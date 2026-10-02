@@ -10,6 +10,15 @@ const platform = window.pdfAtelier ? createElectronPlatform(window.pdfAtelier) :
 
 configurePdf({ assetsBaseUrl: './pdfjs/' })
 
+// Offline/installable web app. Not in Electron (app:// serves local files already) nor in dev.
+if (
+  import.meta.env.PROD &&
+  !window.pdfAtelier &&
+  'serviceWorker' in navigator &&
+  location.protocol.startsWith('http')
+)
+  void navigator.serviceWorker.register('./sw.js').catch((e: unknown) => console.warn('SW', e))
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App platform={platform} />

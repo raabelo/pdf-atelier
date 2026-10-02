@@ -1,4 +1,4 @@
-import { createDocument, type Annotation } from '@pdf-atelier/core'
+import { BLANK_SOURCE, createDocument, newId, type Annotation } from '@pdf-atelier/core'
 import { exportPdf, loadPdf } from '@pdf-atelier/pdf'
 import type { OpenedFile, Platform } from '@pdf-atelier/platform'
 import { t } from '../i18n/index.ts'
@@ -9,7 +9,9 @@ import {
   savedMark,
   useDocuments,
   type OpenDoc,
+  type OpenSource,
 } from '../stores/documents.ts'
+import { blankSource } from './blank.ts'
 import { askConfirm, askPassword, notify } from '../stores/ui.ts'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -34,19 +36,40 @@ async function loadWithPassword(file: OpenedFile) {
   }
 }
 
+/**
+ * Parses a file as a document source: model pages + every existing annotation, imported eagerly
+ * (exportPdf rewrites supported annotation types from the model, so nothing may be left unimported).
+ * null = user cancelled the password prompt.
+ */
+export async function loadSource(file: OpenedFile) {
+  const loaded = await loadWithPassword(file)
+  if (!loaded) return null
+  const { pdf, password } = loaded
+  const model = createDocument({
+    title: file.name,
+    source: { id: pdf.id, name: file.name },
+    pages: [...pdf.pages],
+  })
+  const [imported, extras] = await Promise.all([
+    Promise.all(model.pages.map((p, i) => pdf.getAnnotations(i, p.id))),
+    pdf.getAtelierExtras(),
+  ])
+  model.annotations = Object.fromEntries(imported.flat().map((a: Annotation) => [a.id, a]))
+  model.images = Object.fromEntries(extras.images.map((img) => [img.id, img]))
+  model.bookmarks = extras.bookmarks.flatMap(({ pageIndex, title }) => {
+    const page = model.pages[pageIndex]
+    return page ? [{ id: newId(), pageId: page.id, title }] : []
+  })
+  const source: OpenSource = { bytes: file.bytes, pdf, ...(password !== undefined && { password }) }
+  return { model, source }
+}
+
 export async function openFile(file: OpenedFile) {
   try {
-    const loaded = await loadWithPassword(file)
+    const loaded = await loadSource(file)
     if (!loaded) return
-    const { pdf, password } = loaded
-    const model = createDocument({
-      title: file.name,
-      source: { id: pdf.id, name: file.name },
-      pages: [...pdf.pages],
-    })
+    const { model, source } = loaded
     // Existing annotations become part of the model (no history entry): they are edited/exported like ours.
-    const imported = await Promise.all(model.pages.map((p, i) => pdf.getAnnotations(i, p.id)))
-    model.annotations = Object.fromEntries(imported.flat().map((a: Annotation) => [a.id, a]))
     useDocuments
       .getState()
       .add(
@@ -54,7 +77,10 @@ export async function openFile(file: OpenedFile) {
           model,
           file.name,
           file.ref,
-          new Map([[pdf.id, { bytes: file.bytes, pdf, ...(password !== undefined && { password }) }]]),
+          new Map([
+            [source.pdf.id, source],
+            [BLANK_SOURCE, blankSource],
+          ]),
         ),
       )
   } catch (e) {
@@ -80,11 +106,17 @@ export async function openRecent(platform: Platform, ref: string) {
   else notify(t('error.open', { name: ref, message: 'not found' }), true)
 }
 
-/** Composes the current model into PDF bytes (non-destructive: always from the original sources). */
-export const exportDoc = (doc: OpenDoc) =>
+/** Composes a model into PDF bytes (non-destructive: always from the original sources). */
+export const exportDoc = (doc: OpenDoc, model = doc.history.present) =>
   exportPdf(
-    doc.history.present,
-    new Map([...doc.sources].map(([id, s]) => [id, { bytes: s.bytes, password: s.password }])),
+    model,
+    new Map(
+      [...doc.sources]
+        .filter(([id]) => id !== BLANK_SOURCE)
+        .map(([id, s]) => [id, { bytes: s.bytes, password: s.password }]),
+    ),
+    // Our bookmarks are written as one outline group with this title.
+    { bookmarksTitle: t('sidebar.bookmarks') },
   )
 
 export async function save(

@@ -1,7 +1,17 @@
 import { canRedo, canUndo, docOps } from '@pdf-atelier/core'
 import type { Platform } from '@pdf-atelier/platform'
 import { closeDoc, openWithDialog, save } from '../files/actions.ts'
+import {
+  deletePages,
+  duplicatePages,
+  extractPages,
+  insertBlankPage,
+  rotatePages,
+  toggleBookmark,
+  usePageDialog,
+} from '../files/pages.ts'
 import { printDoc } from '../files/print.ts'
+import { stepHit } from '../sidebar/search.ts'
 import { activeDoc, useDocuments } from '../stores/documents.ts'
 import { useSettings } from '../stores/settings.ts'
 import { goToPage, updateView, useUi, viewOf, type Tool } from '../stores/ui.ts'
@@ -12,6 +22,17 @@ import {
   togglePause,
   useTts,
 } from '../tts/controller.ts'
+import {
+  canCopy,
+  canPaste,
+  copySelection,
+  copyStyle,
+  cutSelection,
+  duplicateSelection,
+  paste,
+  pasteStyle,
+} from '../annotations/actions.ts'
+import { pickImage } from '../annotations/images.ts'
 import type { Command } from './registry.ts'
 
 const hasDoc = () => !!activeDoc()
@@ -46,6 +67,7 @@ const tools: [Tool, string][] = [
   ['ellipse', 'O'],
   ['line', 'L'],
   ['arrow', 'A'],
+  ['note', 'N'],
 ]
 
 export function createCommands(platform: Platform): Command[] {
@@ -185,9 +207,10 @@ export function createCommands(platform: Platform): Command[] {
     {
       id: 'view.toggleSidebar',
       labelKey: 'cmd.view.toggleSidebar',
-      keys: ['Mod+B'],
+      keys: ['Mod+\\'],
       run: () => useUi.setState((s) => ({ sidebarOpen: !s.sidebarOpen })),
     },
+    ...pageCommands(platform),
     {
       id: 'view.toggleTheme',
       labelKey: 'cmd.view.toggleTheme',
@@ -203,6 +226,52 @@ export function createCommands(platform: Platform): Command[] {
       keys: [key],
       run: () => useUi.setState({ tool, selection: [], editing: null }),
     })),
+    {
+      id: 'tool.image',
+      labelKey: 'tool.image',
+      keys: ['I'],
+      when: hasDoc,
+      run: pickImage,
+    },
+    {
+      id: 'insert.signature',
+      labelKey: 'cmd.insert.signature',
+      keys: ['G'],
+      when: hasDoc,
+      run: () => useUi.setState({ insertDialog: 'signature' }),
+    },
+    {
+      id: 'insert.stamp',
+      labelKey: 'cmd.insert.stamp',
+      keys: ['M'],
+      when: hasDoc,
+      run: () => useUi.setState({ insertDialog: 'stamp' }),
+    },
+    // Clipboard: annotation copy/paste only when no text is selected and no field is focused.
+    { id: 'edit.copy', labelKey: 'cmd.edit.copy', keys: ['Mod+C'], when: canCopy, run: copySelection },
+    { id: 'edit.cut', labelKey: 'cmd.edit.cut', keys: ['Mod+X'], when: canCopy, run: cutSelection },
+    { id: 'edit.paste', labelKey: 'cmd.edit.paste', keys: ['Mod+V'], when: canPaste, run: paste },
+    {
+      id: 'edit.duplicate',
+      labelKey: 'cmd.edit.duplicate',
+      keys: ['Mod+D'],
+      when: canCopy,
+      run: duplicateSelection,
+    },
+    {
+      id: 'edit.copyStyle',
+      labelKey: 'cmd.edit.copyStyle',
+      keys: ['Mod+Alt+C'],
+      when: canCopy,
+      run: copyStyle,
+    },
+    {
+      id: 'edit.pasteStyle',
+      labelKey: 'cmd.edit.pasteStyle',
+      keys: ['Mod+Alt+V'],
+      when: () => canCopy() && !!useUi.getState().styleClipboard,
+      run: pasteStyle,
+    },
     {
       id: 'tts.play',
       labelKey: 'cmd.tts.play',
@@ -223,6 +292,36 @@ export function createCommands(platform: Platform): Command[] {
       keys: ['Escape'],
       when: () => useTts.getState().state !== 'idle',
       run: stopReading,
+    },
+  ]
+}
+
+/** Page tools (toolbar "Pages" menu, thumbnail context menu); they act on the thumbnail selection. */
+function pageCommands(platform: Platform): Command[] {
+  const dialog = (open: 'split' | 'images' | 'merge') => () => usePageDialog.setState({ open })
+  return [
+    { id: 'page.insertBlank', labelKey: 'cmd.page.insertBlank', when: hasDoc, run: () => insertBlankPage() },
+    { id: 'page.duplicate', labelKey: 'cmd.page.duplicate', when: hasDoc, run: () => duplicatePages() },
+    { id: 'page.rotate', labelKey: 'cmd.page.rotate', when: hasDoc, run: () => rotatePages() },
+    { id: 'page.delete', labelKey: 'cmd.page.delete', when: hasDoc, run: () => deletePages() },
+    { id: 'page.bookmark', labelKey: 'cmd.page.bookmark', keys: ['Mod+B'], when: hasDoc, run: () => toggleBookmark() },
+    { id: 'page.extract', labelKey: 'cmd.page.extract', when: hasDoc, run: () => extractPages(platform) },
+    { id: 'page.split', labelKey: 'cmd.page.split', when: hasDoc, run: dialog('split') },
+    { id: 'page.merge', labelKey: 'cmd.page.merge', when: hasDoc, run: dialog('merge') },
+    { id: 'page.exportImages', labelKey: 'cmd.page.exportImages', when: hasDoc, run: dialog('images') },
+    {
+      id: 'search.next',
+      labelKey: 'cmd.search.next',
+      keys: ['F3'],
+      when: () => useUi.getState().search.hits.length > 0,
+      run: () => stepHit(1),
+    },
+    {
+      id: 'search.prev',
+      labelKey: 'cmd.search.prev',
+      keys: ['Shift+F3'],
+      when: () => useUi.getState().search.hits.length > 0,
+      run: () => stepHit(-1),
     },
   ]
 }

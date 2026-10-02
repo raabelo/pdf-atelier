@@ -6,7 +6,10 @@ import { runCommand } from '../commands/registry.ts'
 import { closeDoc, openRecent } from '../files/actions.ts'
 import { t } from '../i18n/index.ts'
 import { usePlatform } from '../platform.ts'
-import { AnnotationsPanel, OutlinePanel, SearchPanel } from '../sidebar/panels.tsx'
+import { BookmarksPanel } from '../sidebar/BookmarksPanel.tsx'
+import { OutlinePanel } from '../sidebar/OutlinePanel.tsx'
+import { SearchPanel } from '../sidebar/SearchPanel.tsx'
+import { AnnotationsPanel } from '../sidebar/AnnotationsPanel.tsx'
 import { Thumbnails } from '../sidebar/Thumbnails.tsx'
 import { isDirty, useActiveDoc, useDocuments } from '../stores/documents.ts'
 import { useUi, type Panel } from '../stores/ui.ts'
@@ -63,7 +66,7 @@ export function TabsBar() {
   )
 }
 
-const PANELS: Panel[] = ['pages', 'outline', 'annotations', 'search', 'tts']
+const PANELS: Panel[] = ['pages', 'outline', 'bookmarks', 'annotations', 'search', 'tts']
 
 export function Sidebar() {
   const doc = useActiveDoc()
@@ -96,6 +99,8 @@ export function Sidebar() {
           <Thumbnails key={doc.id} doc={doc} />
         ) : panel === 'outline' ? (
           <OutlinePanel key={doc.id} doc={doc} />
+        ) : panel === 'bookmarks' ? (
+          <BookmarksPanel key={doc.id} doc={doc} />
         ) : panel === 'annotations' ? (
           <AnnotationsPanel doc={doc} />
         ) : (

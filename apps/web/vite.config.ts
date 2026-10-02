@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { createReadStream, existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -64,10 +65,39 @@ function runtimeAssets(): Plugin {
   }
 }
 
+/**
+ * Precache list for public/sw.js: the built app shell. pdf.js data and TTS wasm (/pdfjs/, /tts/)
+ * are cached on first use instead. `version` changes whenever any shell file changes.
+ */
+function swManifest(): Plugin {
+  return {
+    name: 'pdf-atelier-sw-manifest',
+    apply: 'build',
+    generateBundle: {
+      order: 'post',
+      handler(_, bundle) {
+        const hash = createHash('sha256')
+        const files = Object.values(bundle)
+          .filter((f) => !/^(pdfjs|tts)\//.test(f.fileName))
+          .map((f) => {
+            hash.update(f.fileName).update(f.type === 'chunk' ? f.code : f.source)
+            return f.fileName
+          })
+        files.push('manifest.webmanifest', 'icons/icon.svg', 'icons/icon-256.png')
+        this.emitFile({
+          type: 'asset',
+          fileName: 'sw-manifest.json',
+          source: JSON.stringify({ version: hash.digest('hex').slice(0, 16), files: files.sort() }),
+        })
+      },
+    },
+  }
+}
+
 export default defineConfig({
   base: './',
   define: { __APP_VERSION__: JSON.stringify(version) },
-  plugins: [react(), tailwindcss(), runtimeAssets()],
+  plugins: [react(), tailwindcss(), runtimeAssets(), swManifest()],
   // onnxruntime-web: use the build that loads its wasm from wasmPaths (/tts/ort/) instead of bundling a 2nd copy.
   resolve: { conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions] },
   worker: { format: 'es' },

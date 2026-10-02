@@ -7,6 +7,7 @@ import { PlatformProvider } from '../platform.ts'
 import { isDirty, useActiveDoc, useDocuments } from '../stores/documents.ts'
 import { loadSettings, useSettings } from '../stores/settings.ts'
 import { TooltipProvider } from '../ui/overlays.tsx'
+import { PageDialogs } from '../sidebar/PageDialogs.tsx'
 import { Viewer } from '../viewer/Viewer.tsx'
 import {
   AboutDialog,
@@ -101,6 +102,7 @@ export function App({ platform }: { platform: Platform }) {
           <ConfirmDialog />
           <ProgressDialog />
           <AboutDialog />
+          <PageDialogs />
         </div>
       </TooltipProvider>
     </PlatformProvider>
