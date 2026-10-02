@@ -11,6 +11,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import type { Annotation, Point, Rect, Rotation } from '@pdf-atelier/core'
 import { HIDDEN_FLAGS, isSupportedSubtype, readAtelierData, type AtelierData } from './atelier.ts'
 import type { OutlineItem, PdfLink, PdfSource, RenderOptions, SearchHit } from './types.ts'
+import { bindTextSelection } from './text-selection.ts'
 
 let assetsBaseUrl: string | null = null
 let workerReady = false
@@ -158,9 +159,12 @@ class PdfJsSource implements PdfSource {
     })
     opts.signal?.addEventListener('abort', () => layer.cancel(), { once: true })
     await layer.render()
+    const unbind = bindTextSelection(container)
     return () => {
+      unbind()
       layer.cancel()
       container.replaceChildren()
+      container.classList.remove('selecting')
     }
   }
 

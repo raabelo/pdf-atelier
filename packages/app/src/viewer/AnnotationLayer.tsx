@@ -12,7 +12,7 @@ import {
   type Rect,
   type Rotation,
 } from '@pdf-atelier/core'
-import type { PdfLink } from '@pdf-atelier/pdf'
+import { GAP_MARGIN, type PdfLink } from '@pdf-atelier/pdf'
 import { cn } from 'cn'
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { t } from '../i18n/index.ts'
@@ -189,13 +189,15 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
     startDrag(e, { kind: 'draw', points: [toPage(e)] })
   }
 
-  // Marquee: select tool, drag that starts on the page but not on text, an annotation or an editor.
+  // Marquee: select tool, drag that starts on the page away from text, annotations and editors.
+  // Drags starting next to/between words belong to native text selection; Alt forces the marquee anywhere.
   useEffect(() => {
     const host = svgRef.current?.parentElement
     if (!host || tool !== 'select') return
     const onDown = (e: globalThis.PointerEvent) => {
       const target = e.target as Element
       if (e.button !== 0 || target.closest('svg g, .textLayer span, textarea, foreignObject')) return
+      if (!e.altKey && nearText(host, e.clientX, e.clientY)) return
       e.preventDefault() // no text selection while dragging the marquee
       ;(document.activeElement as HTMLElement | null)?.blur() // preventDefault also blocks blur: commit open editors
       const base = e.shiftKey || e.ctrlKey || e.metaKey ? useUi.getState().selection : []
@@ -471,4 +473,20 @@ function NoteEditor({ a }: { a: Extract<Annotation, { type: 'note' }> }) {
       />
     </foreignObject>
   )
+}
+
+/**
+ * Whether a point is close enough to a text run that the user most likely wants to select text: inside the run's
+ * line band (half a line above/below) and within ~1.5 line heights of its ends. Margins scale with the font size,
+ * so it behaves the same at every zoom.
+ */
+function nearText(host: Element, x: number, y: number): boolean {
+  for (const span of host.querySelectorAll('.textLayer span')) {
+    const r = span.getBoundingClientRect()
+    if (!r.width || !r.height) continue
+    const mx = r.height * GAP_MARGIN.x
+    const my = r.height * GAP_MARGIN.y
+    if (x >= r.left - mx && x <= r.right + mx && y >= r.top - my && y <= r.bottom + my) return true
+  }
+  return false
 }
