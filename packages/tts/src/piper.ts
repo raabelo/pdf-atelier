@@ -1,4 +1,4 @@
-import type { Provider, SpeakOptions, Voice } from './types.ts'
+import type { Provider, SpeakOptions, SpeakResult, Voice } from './types.ts'
 import type { WorkerRequest, WorkerResponse } from './piper.worker.ts'
 
 type Distributive<T> = T extends unknown ? Omit<T, 'id'> : never
@@ -17,7 +17,9 @@ export const PIPER_VOICES: Voice[] = [
   },
 ].map((v) => ({ ...v, provider: 'piper' as const, installed: false, sizeBytes: 63_200_000 }))
 
-export function createPiperProvider(base: string): Provider {
+export function createPiperProvider(assetsBaseUrl: string): Provider {
+  // The worker resolves relative URLs against its own script URL (e.g. /assets/), so make the base absolute here.
+  const base = new URL(assetsBaseUrl, globalThis.location?.href).href
   let worker: Worker | null = null
   let nextId = 1
   const pending = new Map<
@@ -58,7 +60,7 @@ export function createPiperProvider(base: string): Provider {
   }
 
   let audio: HTMLAudioElement | null = null
-  let finish: (() => void) | null = null
+  let finish: ((r: SpeakResult) => void) | null = null
   let gen = 0 // bumped by stop(); a speak() that sees a newer gen bails out
   let paused = false
 
@@ -77,20 +79,20 @@ export function createPiperProvider(base: string): Provider {
       if (opts.voiceId) predict(text, opts.voiceId).catch(() => {})
     },
 
-    async speak(text: string, opts: SpeakOptions) {
+    async speak(text: string, opts: SpeakOptions): Promise<SpeakResult> {
       if (!opts.voiceId) throw new Error('Piper needs a voiceId')
       const key = `${opts.voiceId}\n${text}`
       const my = gen
       const blob = await predict(text, opts.voiceId).finally(() => cache.delete(key))
-      if (my !== gen) return
+      if (my !== gen) return 'stopped'
       const url = URL.createObjectURL(blob)
       try {
-        await new Promise<void>((resolve, reject) => {
+        return await new Promise<SpeakResult>((resolve, reject) => {
           const el = new Audio(url)
           audio = el
           el.playbackRate = opts.rate
           finish = resolve
-          el.onended = () => resolve()
+          el.onended = () => resolve('ended')
           el.onerror = () => reject(new Error('Audio playback failed'))
           if (!paused) el.play().catch(reject)
         })
@@ -114,7 +116,7 @@ export function createPiperProvider(base: string): Provider {
       paused = false
       cache.clear()
       audio?.pause()
-      finish?.()
+      finish?.('stopped')
     },
 
     install: (id, onProgress) => call<void>({ type: 'load', voiceId: id, base }, onProgress),

@@ -42,7 +42,7 @@ describe('splitSentences', () => {
 function fakeProvider(voices: Voice[], log: string[] = []): Provider {
   return {
     getVoices: async () => voices,
-    speak: async (text) => void log.push(text),
+    speak: async (text) => (log.push(text), 'ended'),
     pause() {},
     resume() {},
     stop() {},
@@ -89,9 +89,24 @@ describe('engine.speak', () => {
     const engine = createEngine({ piper: fakeProvider([]), system: fakeProvider([v('sys-en', 'en-US', 'system')], log) })
     const segments: { start: number; end: number }[] = []
     const text = 'Hello there, my friend. How are you doing today?'
-    await engine.speak(text, { lang: 'en-US', rate: 1, onSegment: (s) => segments.push(s) })
+    expect(await engine.speak(text, { lang: 'en-US', rate: 1, onSegment: (s) => segments.push(s) })).toBe('ended')
     expect(log).toEqual(['Hello there, my friend.', 'How are you doing today?'])
     expect(segments.map((s) => text.slice(s.start, s.end))).toEqual(log)
+    expect(engine.state).toBe('idle')
+  })
+  it("resolves 'stopped' when stop() interrupts it", async () => {
+    let release!: () => void
+    const slow: Provider = {
+      ...fakeProvider([v('sys-en', 'en-US', 'system')]),
+      speak: () => new Promise((r) => (release = () => r('stopped'))),
+      stop: () => release?.(),
+    }
+    const engine = createEngine({ piper: fakeProvider([]), system: slow })
+    const result = engine.speak('One sentence here. And another one.', { lang: 'en-US', rate: 1 })
+    await new Promise((r) => setTimeout(r, 0))
+    expect(engine.state).toBe('speaking')
+    engine.stop()
+    expect(await result).toBe('stopped')
     expect(engine.state).toBe('idle')
   })
 })

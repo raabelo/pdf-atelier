@@ -1,4 +1,4 @@
-import type { Provider, SpeakOptions, Voice } from './types.ts'
+import type { Provider, SpeakOptions, SpeakResult, Voice } from './types.ts'
 
 /** Used when the runtime exposes no voices (e.g. Electron on Windows): speak by utterance.lang only. */
 export const SYSTEM_DEFAULT: Voice = {
@@ -12,7 +12,7 @@ export const SYSTEM_DEFAULT: Voice = {
 /** Web Speech API. The engine feeds it one sentence at a time (Chrome cuts long utterances). */
 export function createSystemProvider(): Provider {
   const synth = typeof speechSynthesis === 'undefined' ? null : speechSynthesis
-  let finish: (() => void) | null = null
+  let finish: ((r: SpeakResult) => void) | null = null
   let gen = 0 // bumped by stop()
 
   async function nativeVoices(): Promise<SpeechSynthesisVoice[]> {
@@ -41,23 +41,24 @@ export function createSystemProvider(): Provider {
       }))
     },
 
-    async speak(text: string, opts: SpeakOptions) {
+    async speak(text: string, opts: SpeakOptions): Promise<SpeakResult> {
       if (!synth) throw new Error('Speech synthesis is not available')
       const u = new SpeechSynthesisUtterance(text)
       u.lang = opts.lang
       u.rate = opts.rate
       const my = gen
       const voice = (await nativeVoices()).find((v) => v.voiceURI === opts.voiceId)
-      if (my !== gen) return
+      if (my !== gen) return 'stopped'
       if (voice) u.voice = voice
-      await new Promise<void>((resolve) => {
+      const result = await new Promise<SpeakResult>((resolve) => {
         finish = resolve
-        u.onend = () => resolve()
+        u.onend = () => resolve('ended')
         // 'interrupted'/'canceled' come from stop(); other errors also just end this chunk.
-        u.onerror = () => resolve()
+        u.onerror = (e) => resolve(e.error === 'interrupted' || e.error === 'canceled' ? 'stopped' : 'ended')
         synth.speak(u)
       })
       finish = null
+      return my === gen ? result : 'stopped'
     },
 
     pause: () => synth?.pause(),
@@ -65,7 +66,7 @@ export function createSystemProvider(): Provider {
     stop() {
       gen++
       synth?.cancel()
-      finish?.()
+      finish?.('stopped')
     },
   }
 }

@@ -70,7 +70,7 @@ export function createEngine(providers: { piper: Provider; system: Provider }): 
       engine.stop()
       const token = ++run
       const voice = await engine.resolveVoice(opts.lang, opts.voiceId)
-      if (token !== run) return
+      if (token !== run) return 'stopped'
       if (!voice) throw new Error(`No voice for ${opts.lang}`)
       const provider = voice.provider === 'piper' ? providers.piper : providers.system
       const o = { ...opts, voiceId: voice.id }
@@ -79,13 +79,14 @@ export function createEngine(providers: { piper: Provider; system: Provider }): 
       setState('speaking')
       try {
         for (let i = 0; i < parts.length; i++) {
-          if (token !== run) return
+          if (token !== run) return 'stopped'
           const part = parts[i]!
           const next = parts[i + 1]
           if (next) provider.prefetch?.(next.text, o)
           opts.onSegment?.({ start: part.start, end: part.end })
-          await provider.speak(part.text, o)
+          if ((await provider.speak(part.text, o)) === 'stopped' || token !== run) return 'stopped'
         }
+        return 'ended'
       } finally {
         if (token === run) {
           active = null

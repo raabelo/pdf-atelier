@@ -1,4 +1,4 @@
-export type { Voice, SpeakOptions, TextToSpeechProvider, TtsEngine } from './types.ts'
+export type { Voice, SpeakOptions, SpeakResult, TextToSpeechProvider, TtsEngine } from './types.ts'
 export { createTtsEngine } from './engine.ts'
 export { splitSentences, type Sentence } from './sentences.ts'
 export { PIPER_VOICES } from './piper.ts'

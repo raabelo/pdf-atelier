@@ -10,6 +10,8 @@ export interface Voice {
   attribution?: string
 }
 
+export type SpeakResult = 'ended' | 'stopped'
+
 export interface SpeakOptions {
   voiceId?: string
   lang: string
@@ -21,8 +23,8 @@ export interface SpeakOptions {
 
 export interface TextToSpeechProvider {
   getVoices(): Promise<Voice[]>
-  /** Resolves when finished or stopped. */
-  speak(text: string, opts: SpeakOptions): Promise<void>
+  /** 'ended' when it finished; 'stopped' when stop() or a newer speak() interrupted it. */
+  speak(text: string, opts: SpeakOptions): Promise<SpeakResult>
   pause(): void
   resume(): void
   stop(): void
