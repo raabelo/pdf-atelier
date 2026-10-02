@@ -198,6 +198,7 @@ function buildMenu(): void {
           cmd(t('Open…', 'Abrir…'), 'file.open', 'CmdOrCtrl+O'),
           cmd(t('Save', 'Salvar'), 'file.save', 'CmdOrCtrl+S'),
           cmd(t('Save As…', 'Salvar como…'), 'file.saveAs', 'CmdOrCtrl+Shift+S'),
+          cmd(t('Save Compressed Copy…', 'Salvar cópia comprimida…'), 'file.saveCompressed', 'CmdOrCtrl+Alt+S'),
           { type: 'separator' },
           cmd(t('Print…', 'Imprimir…'), 'file.print', 'CmdOrCtrl+P'),
           { type: 'separator' },

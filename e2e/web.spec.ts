@@ -146,3 +146,18 @@ test('service worker registers for offline use', async ({ page }) => {
   )
   expect(active).toMatch(/sw\.js$/)
 })
+
+test('compressed copy downloads a smaller, equivalent PDF and reports the gain', async ({ page }) => {
+  await noNativePickers(page)
+  await page.goto('/')
+  // Uncompressed source (no object streams, raw content) so there is something to gain.
+  const src = await PDFDocument.load(await makePdf(3))
+  const original = Buffer.from(await src.save({ useObjectStreams: false }))
+  await dropPdf(page, original, 'grande.pdf')
+  const [download] = await Promise.all([page.waitForEvent('download'), page.keyboard.press('Control+Alt+s')])
+  expect(download.suggestedFilename()).toMatch(/grande-(comprimido|compressed)\.pdf/)
+  const bytes = readFileSync((await download.path())!)
+  expect(bytes.length).toBeLessThan(original.length)
+  expect((await PDFDocument.load(bytes)).getPageCount()).toBe(3)
+  await expect(page.getByText(/−\d+%/)).toBeVisible()
+})

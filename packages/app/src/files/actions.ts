@@ -107,7 +107,7 @@ export async function openRecent(platform: Platform, ref: string) {
 }
 
 /** Composes a model into PDF bytes (non-destructive: always from the original sources). */
-export const exportDoc = (doc: OpenDoc, model = doc.history.present) =>
+export const exportDoc = (doc: OpenDoc, model = doc.history.present, compress = false) =>
   exportPdf(
     model,
     new Map(
@@ -116,8 +116,38 @@ export const exportDoc = (doc: OpenDoc, model = doc.history.present) =>
         .map(([id, s]) => [id, { bytes: s.bytes, password: s.password }]),
     ),
     // Our bookmarks are written as one outline group with this title.
-    { bookmarksTitle: t('sidebar.bookmarks') },
+    { bookmarksTitle: t('sidebar.bookmarks'), compress },
   )
+
+/**
+ * Saves a losslessly compressed copy (see pdf compressDocument) as a new file and reports the size change
+ * against the original file(s). The open document keeps pointing at its own file.
+ */
+export async function saveCompressed(platform: Platform, doc: OpenDoc | undefined = activeDoc()) {
+  if (!doc) return
+  try {
+    const bytes = await exportDoc(doc, doc.history.present, true)
+    const before = [...doc.sources].reduce((n, [id, s]) => n + (id === BLANK_SOURCE ? 0 : s.bytes.length), 0)
+    const name = doc.name.replace(/\.pdf$/i, '') + t('compress.suffix') + '.pdf'
+    if (!(await platform.files.saveAs(name, bytes))) return
+    const pct = before ? Math.round((1 - bytes.length / before) * 100) : 0
+    notify(
+      t(pct > 0 ? 'compress.done' : 'compress.noGain', {
+        before: formatBytes(before),
+        after: formatBytes(bytes.length),
+        pct: String(pct),
+      }),
+    )
+  } catch (e) {
+    notify(t('error.save', { message: message(e) }), true)
+  }
+}
+
+export function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`
+  if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / 1024 ** 2).toFixed(1)} MB`
+}
 
 export async function save(
   platform: Platform,

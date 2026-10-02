@@ -56,6 +56,8 @@
 - PWA / offline.
 - ~~Biblioteca de i18n completa~~ — adiada: o catálogo `t()` PT-BR/EN cobre a necessidade atual; adotar lib quando houver plural/formatação complexa ou mais idiomas.
 
+- ✅ Antecipado da V2: compressão sem perda ("Salvar cópia comprimida").
+
 ## V1.5
 
 - Polígonos, régua/medição.

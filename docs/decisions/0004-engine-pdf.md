@@ -25,6 +25,7 @@ PDF.js (`pdfjs-dist` 6.3) para leitura/render/texto/busca/links/import de anota�
 
 - FreeText com caracteres fora de WinAnsi embute subsets de Noto Sans (OFL, `@fontsource/noto-sans`) via `@cantoo/fontkit`, carregados sob demanda; texto WinAnsi continua em Helvetica.
 - PDF de origem protegido: `exportPdf` recebe a senha por fonte e recriptografa a saída (AES-256, mesma senha como user/owner) — salvar nunca remove a proteção silenciosamente.
+- Compressão **sem perda** (`exportPdf({ compress: true })`, comando "Salvar cópia comprimida"): recomprime streams Flate no nível máximo, comprime streams sem filtro, deduplica streams idênticos (fontes/imagens repetidas após mesclar), remove `/Thumb` e `/PieceInfo` e objetos inalcançáveis, usa object streams. Imagens DCT/JPX/JBIG2/CCITT não são tocadas: nenhuma reamostragem ou recompressão com perda. Ganho depende do arquivo (PDFs já otimizados ganham pouco).
 - Impressão é só do app (igual nos dois runtimes): exporta, rasteriza páginas a 150 DPI e chama `window.print()`.
 
 - Bytes originais precisam ser copiados antes de ir ao PDF.js (o worker transfere/destaca o `ArrayBuffer`).

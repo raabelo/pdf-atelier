@@ -2,32 +2,16 @@
 import { PDFDocument, PDFName, PDFString, StandardFonts } from '@cantoo/pdf-lib'
 import { getDocument } from 'pdfjs-dist'
 import { BLANK_SOURCE, type Annotation, type AnnotationStyle, type DocumentModel } from '@pdf-atelier/core'
-import { beforeAll, describe, expect, it } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { readFile } from 'node:fs/promises' // eslint-disable-line no-restricted-imports -- test-only font loading
 import { exportPdf, loadPdf, readAtelierAnnotations } from './index.ts'
 import { setFontFetcher } from './fonts.ts'
+import './test-setup.ts'
 
 // Vite asset URLs have no server in node tests: read the font files straight from node_modules.
 setFontFetcher(async (url) => {
   const name = url.split(/[/?]/).find((p) => p.endsWith('.woff'))!
   return new Uint8Array(await readFile(new URL(`../../../node_modules/@fontsource/noto-sans/files/${name}`, import.meta.url)))
-})
-
-// pdf.js's modern build expects Uint8Array#toHex (browsers have it; Node 24's V8 does not yet).
-;(Uint8Array.prototype as any).toHex ??= function (this: Uint8Array) {
-  return Array.from(this, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-// Same for Math.sumPrecise (used by pdf.js' AES-256 key derivation).
-;(Math as any).sumPrecise ??= (xs: Iterable<number>) => [...xs].reduce((s, x) => s + x, 0)
-;(Map.prototype as any).getOrInsertComputed ??= function <K, V>(this: Map<K, V>, k: K, fn: (k: K) => V) {
-  if (!this.has(k)) this.set(k, fn(k))
-  return this.get(k)
-}
-
-beforeAll(async () => {
-  // Node has no Worker: run pdf.js's worker in-process.
-  // @ts-expect-error the worker bundle ships no types
-  ;(globalThis as any).pdfjsWorker = await import('pdfjs-dist/build/pdf.worker.mjs')
 })
 
 async function makeSource() {

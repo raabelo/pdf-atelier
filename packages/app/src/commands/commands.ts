@@ -1,6 +1,6 @@
 import { canRedo, canUndo, docOps } from '@pdf-atelier/core'
 import type { Platform } from '@pdf-atelier/platform'
-import { closeDoc, openWithDialog, save } from '../files/actions.ts'
+import { closeDoc, openWithDialog, save, saveCompressed } from '../files/actions.ts'
 import {
   deletePages,
   duplicatePages,
@@ -91,6 +91,13 @@ export function createCommands(platform: Platform): Command[] {
       keys: ['Mod+Shift+S'],
       when: hasDoc,
       run: () => save(platform, activeDoc(), true),
+    },
+    {
+      id: 'file.saveCompressed',
+      labelKey: 'cmd.file.saveCompressed',
+      keys: ['Mod+Alt+S'],
+      when: hasDoc,
+      run: () => saveCompressed(platform),
     },
     {
       id: 'file.print',

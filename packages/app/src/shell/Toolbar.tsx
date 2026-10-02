@@ -29,6 +29,7 @@ import {
   ZoomIn,
   ZoomOut,
   type LucideIcon,
+  Shrink,
 } from 'lucide-react'
 import { formatKeys, runCommand } from '../commands/registry.ts'
 import { t, type MessageKey } from '../i18n/index.ts'
@@ -228,6 +229,7 @@ export function Toolbar() {
       <Separator vertical />
       <Cmd id="file.open" icon={FolderOpen} />
       <Cmd id="file.save" icon={Save} disabled={noDoc} />
+      <Cmd id="file.saveCompressed" icon={Shrink} disabled={noDoc} />
       <Cmd id="file.print" icon={Printer} disabled={noDoc} />
       <Separator vertical />
       <Cmd id="edit.undo" icon={Undo2} disabled={!doc || !canUndo(doc.history)} />

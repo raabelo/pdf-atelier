@@ -18,6 +18,7 @@ import fontkit from '@cantoo/fontkit'
 import { BLANK_SOURCE, NOTE_SIZE, type Annotation, type DocumentModel, type ImageAsset, type Point, type Rect, type Reply } from '@pdf-atelier/core'
 import { loadNotoSans, pdfFontkit } from './fonts.ts'
 import { readOutline, writeOutline, type OutlineNode } from './outline.ts'
+import { compressDocument } from './compress.ts'
 
 /** Private key holding the domain annotation JSON, so our annotations round-trip without loss. */
 const ATELIER_KEY = 'PDFAtelier'
@@ -163,11 +164,12 @@ function isValidAnnotation(a: any): a is Annotation {
  * dropped and the model's annotations are written (standard /Annot + /AP + /PDFAtelier JSON). Annotations we
  * don't own (links, foreign stamps, hidden ones...) are copied untouched. Outlines are rebuilt (see below).
  * `pageIds` exports only those pages (extract/split), keeping document order.
+ * `compress` applies lossless size reduction (see compressDocument).
  */
 export async function exportPdf(
   doc: DocumentModel,
   sources: ReadonlyMap<string, { bytes: Uint8Array; password?: string }>,
-  opts: { pageIds?: string[]; bookmarksTitle?: string } = {},
+  opts: { pageIds?: string[]; bookmarksTitle?: string; compress?: boolean } = {},
 ): Promise<Uint8Array> {
   const out = await PDFDocument.create()
   out.registerFontkit(pdfFontkit)
@@ -241,6 +243,10 @@ export async function exportPdf(
   // Saving must never silently strip protection: when a source was password-protected, the output is encrypted
   // with that password as both user and owner password (AES-256, the library default). With several protected
   // sources, the first one's password is used.
+  if (opts.compress) {
+    await out.flush() // embed pending fonts/images first so they are part of the pass
+    compressDocument(out)
+  }
   if (password) out.encrypt({ userPassword: password, ownerPassword: password })
   return out.save()
 }
