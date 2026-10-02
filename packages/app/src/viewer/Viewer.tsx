@@ -57,7 +57,24 @@ export function Viewer({ doc }: { doc: OpenDoc }) {
     overscan: 1,
   })
 
-  useEffect(() => virtualizer.measure(), [virtualizer, scale, view.rotation, pages])
+  useEffect(() => virtualizer.measure(), [virtualizer, pages])
+
+  // Zoom/rotation keep the reading position: the page under the "current page" line (a third down the viewport,
+  // see onScroll) and how far into it, plus the horizontal center. Recorded on scroll, restored before paint.
+  const anchor = useRef<{ index: number; fraction: number; x: number } | null>(null)
+  useLayoutEffect(() => {
+    virtualizer.measure()
+    const el = scrollRef.current
+    const a = anchor.current
+    if (!el || !a) return
+    // getTotalSize() recomputes the measurements for the new scale (and refreshes measurementsCache). Grow the
+    // scroll area right away so the new scrollTop isn't clamped to the old height.
+    ;(el.firstElementChild as HTMLElement).style.height = `${virtualizer.getTotalSize()}px`
+    const m = virtualizer.measurementsCache[a.index]
+    if (!m) return
+    el.scrollTop = m.start + a.fraction * m.size - el.clientHeight / 3
+    el.scrollLeft = a.x * el.scrollWidth - el.clientWidth / 2
+  }, [virtualizer, scale, view.rotation])
 
   // Scroll requests (thumbnails, outline, search, page navigation).
   useEffect(() => {
@@ -67,9 +84,18 @@ export function Viewer({ doc }: { doc: OpenDoc }) {
   // Keep the per-tab current page in sync with the scroll position.
   const onScroll = () => {
     const el = scrollRef.current!
-    const mid = el.scrollTop + el.clientHeight / 3
-    const item = virtualizer.getVirtualItems().find((v) => v.end > mid)
-    if (item && item.index !== viewOf(doc.id).page) updateView(doc.id, { page: item.index })
+    const line = el.scrollTop + el.clientHeight / 3
+    // From the measurements, not getVirtualItems(): the rendered range is still stale during this event
+    // (a page jump is a single scroll event), which used to leave the current page and anchor unset.
+    const at = virtualizer.getVirtualItemForOffset(line)
+    if (at) {
+      anchor.current = {
+        index: at.index,
+        fraction: Math.max(0, (line - at.start) / at.size),
+        x: (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth,
+      }
+      if (at.index !== viewOf(doc.id).page) updateView(doc.id, { page: at.index })
+    }
   }
 
   const byPage = useMemo(() => {

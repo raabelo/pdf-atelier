@@ -194,3 +194,19 @@ test('status bar: type a page number to jump; view controls live there', async (
   await expect(zoom).not.toHaveText(before!)
   await expect(page.locator('header').getByRole('button', { name: /Aumentar zoom|Zoom in/ })).toHaveCount(0)
 })
+
+test('zooming keeps the current page in view', async ({ page }) => {
+  await page.goto('/')
+  await dropPdf(page, await makePdf(30), 'zoom.pdf')
+  const footer = page.locator('footer')
+  await footer.getByRole('button', { name: /^1$/ }).click()
+  await footer.getByRole('textbox').fill('17')
+  await page.keyboard.press('Enter')
+  await expect(footer.getByRole('button', { name: /^17$/ })).toBeVisible()
+  for (const key of ['Control+=', 'Control+=', 'Control+-', 'Control+-', 'Control+-']) {
+    await page.keyboard.press(key)
+    await page.waitForTimeout(300)
+    await expect(page.locator('[data-page-id][aria-label$=" 17"]')).toBeInViewport()
+    await expect(footer.getByRole('button', { name: /^17$/ })).toBeVisible()
+  }
+})
