@@ -1,0 +1,16 @@
+{
+  "name": "@pdf-atelier/pdf",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@cantoo/pdf-lib": "^2.11.1",
+    "@pdf-atelier/core": "workspace:*",
+    "pdfjs-dist": "^6.3.289"
+  }
+}

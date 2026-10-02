@@ -1,0 +1,14 @@
+{
+  "name": "@pdf-atelier/tts",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@mintplex-labs/piper-tts-web": "^1.0.5"
+  }
+}

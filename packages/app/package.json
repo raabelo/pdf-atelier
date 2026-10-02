@@ -1,0 +1,33 @@
+{
+  "name": "@pdf-atelier/app",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@pdf-atelier/core": "workspace:*",
+    "@pdf-atelier/pdf": "workspace:*",
+    "@pdf-atelier/platform": "workspace:*",
+    "@pdf-atelier/tts": "workspace:*",
+    "@tanstack/react-virtual": "^3.14.13",
+    "class-variance-authority": "^0.7.1",
+    "cn": "^0.4.0",
+    "idb": "^8.0.3",
+    "immer": "^11.1.18",
+    "lucide-react": "^1.50.0",
+    "radix-ui": "^1.6.7",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "jsdom": "^30.1.1"
+  }
+}
