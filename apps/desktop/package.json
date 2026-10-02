@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "node scripts/dev.mjs",
     "build": "node scripts/build.mjs",
-    "dist": "node scripts/build.mjs && electron-builder --win",
+    "dist": "pnpm --filter @pdf-atelier/web build && node scripts/build.mjs && electron-builder --win",
     "typecheck": "tsc --noEmit -p ."
   },
   "devDependencies": {
@@ -21,7 +21,8 @@
     "appId": "dev.pdfatelier.app",
     "productName": "PDF Atelier",
     "directories": {
-      "output": "release"
+      "output": "release",
+      "buildResources": "build"
     },
     "files": [
       "out/**",
@@ -31,16 +32,31 @@
       {
         "from": "../web/dist",
         "to": "web"
+      },
+      {
+        "from": "../../LICENSE",
+        "to": "LICENSE"
+      },
+      {
+        "from": "../../THIRD_PARTY_NOTICES.md",
+        "to": "THIRD_PARTY_NOTICES.md"
       }
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "artifactName": "PDF-Atelier-Setup-${version}.${ext}"
+      "createStartMenuShortcut": true,
+      "shortcutName": "PDF Atelier",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "artifactName": "PDF-Atelier-Setup-${version}.${ext}",
+      "license": "../../LICENSE"
     },
     "electronFuses": {
       "runAsNode": false,
@@ -50,6 +66,21 @@
       "enableEmbeddedAsarIntegrityValidation": true,
       "onlyLoadAppFromAsar": true,
       "grantFileProtocolExtraPrivileges": false
-    }
-  }
+    },
+    "asar": true,
+    "fileAssociations": [
+      {
+        "ext": "pdf",
+        "name": "PDF Document",
+        "description": "PDF Document",
+        "role": "Viewer",
+        "icon": "build/icon.ico"
+      }
+    ],
+    "electronVersion": "44.5.1",
+    "electronDist": "../../node_modules/electron/dist"
+  },
+  "description": "PDF reader and editor",
+  "author": "PDF Atelier",
+  "license": "AGPL-3.0-only"
 }

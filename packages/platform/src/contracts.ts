@@ -52,4 +52,6 @@ export interface Platform {
   shell: ShellAdapter
   /** Commands from the native app menu (desktop only), e.g. 'file.open'. Returns unsubscribe. */
   onNativeCommand?(cb: (commandId: string) => void): () => void
+  /** Files the OS asks the app to open ("Open with", double-click). Desktop only. Returns unsubscribe. */
+  onOpenFile?(cb: (file: OpenedFile) => void): () => void
 }

@@ -1,7 +1,7 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, shell, type IpcMainInvokeEvent } from 'electron'
 import { readFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
-import { ipc, MENU_COMMAND_CHANNEL, safeExternalUrl, type IpcChannel, type IpcReq, type IpcRes } from '@pdf-atelier/platform'
+import { ipc, MENU_COMMAND_CHANNEL, OPEN_REQUEST_CHANNEL, safeExternalUrl, type IpcChannel, type IpcReq, type IpcRes } from '@pdf-atelier/platform'
 import { assertPdfFile, FileRegistry, isPdfPath, readPdf, resolveInside, writeAtomic } from './files.ts'
 
 const SCHEME = 'app'
@@ -16,6 +16,7 @@ const CSP = [
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
+  "media-src 'self' blob:",
   "connect-src 'self' https://huggingface.co https://*.hf.co blob: data:",
   "font-src 'self' data:",
   "object-src 'none'",
@@ -50,6 +51,24 @@ if (!app.requestSingleInstanceLock()) app.quit()
 const webRoot = app.isPackaged ? join(process.resourcesPath, 'web') : join(__dirname, '../../web/dist')
 const files = new FileRegistry(join(app.getPath('userData'), 'recent.json'))
 let win: BrowserWindow | null = null
+/** Refs of files the OS asked us to open, waiting for the renderer to pull them. */
+let pendingOpen: string[] = []
+
+/** Queues PDFs passed on the command line ("Open with", double-click, second instance). */
+async function queueArgvFiles(argv: readonly string[]): Promise<void> {
+  for (const arg of argv) {
+    if (!isPdfPath(arg)) continue // skips the exe, '.', and Chromium flags
+    try {
+      await assertPdfFile(arg)
+    } catch {
+      continue
+    }
+    const ref = files.grant(arg)
+    await files.touch(ref)
+    pendingOpen.push(ref)
+  }
+  if (pendingOpen.length) win?.webContents.send(OPEN_REQUEST_CHANNEL)
+}
 
 function serveApp(): void {
   protocol.handle(SCHEME, async (req) => {
@@ -137,6 +156,12 @@ function registerIpc(): void {
     const ref = files.grant(path)
     await files.touch(ref)
     return ref
+  })
+  handle('files:takePending', async () => {
+    const refs = pendingOpen
+    pendingOpen = []
+    const opened = await Promise.all(refs.map(openGranted))
+    return opened.filter((f) => f !== null)
   })
   handle('shell:openExternal', async (url) => {
     const safe = safeExternalUrl(url)
@@ -237,7 +262,8 @@ app.on('web-contents-created', (_e, contents) => {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
 })
 
-app.on('second-instance', () => {
+app.on('second-instance', (_e, argv) => {
+  void queueArgvFiles(argv)
   if (!win) return
   if (win.isMinimized()) win.restore()
   win.focus()
@@ -253,4 +279,5 @@ void app.whenReady().then(async () => {
   registerIpc()
   buildMenu()
   createWindow()
+  await queueArgvFiles(process.argv)
 })

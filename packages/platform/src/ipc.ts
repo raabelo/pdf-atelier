@@ -24,6 +24,8 @@ export const ipc = {
   'files:removeRecent': { req: z.tuple([fileRef]), res: z.void() },
   /** Preload-internal (not callable via bridge.invoke): dropped file path -> writable ref. */
   'files:refForDroppedPath': { req: z.tuple([z.string().min(1).max(4096)]), res: fileRef.nullable() },
+  /** Files the OS asked us to open (argv / second instance), drained once. */
+  'files:takePending': { req: z.tuple([]), res: z.array(opened) },
   'shell:openExternal': { req: z.tuple([z.string().max(4096)]), res: z.void() },
 } as const
 
@@ -48,10 +50,14 @@ export interface DesktopBridge {
   refForDroppedFile(file: File): Promise<string | null>
   /** Native menu commands (main -> renderer). Returns unsubscribe. */
   onMenuCommand(cb: (commandId: string) => void): () => void
+  /** Nudge from main that OS open requests are pending (pull them with 'files:takePending'). */
+  onOpenRequest(cb: () => void): () => void
 }
 
 /** main -> renderer event channel for native menu commands. */
 export const MENU_COMMAND_CHANNEL = 'menu:command'
+/** main -> renderer nudge: files from the OS are waiting in 'files:takePending'. */
+export const OPEN_REQUEST_CHANNEL = 'file:open-request'
 
 declare global {
   interface Window {

@@ -19,5 +19,13 @@ export function createElectronPlatform(bridge: DesktopBridge): Platform {
     },
     shell: { openExternal: (url) => bridge.invoke('shell:openExternal', url) },
     onNativeCommand: (cb) => bridge.onMenuCommand(cb),
+    onOpenFile(cb) {
+      // Pull-based: files queued before this subscription (first launch argv) are drained right away.
+      const drain = async () => {
+        for (const file of await bridge.invoke('files:takePending')) cb(file)
+      }
+      void drain()
+      return bridge.onOpenRequest(() => void drain())
+    },
   }
 }

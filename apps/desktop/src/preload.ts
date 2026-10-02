@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
-import { MENU_COMMAND_CHANNEL, RENDERER_CHANNELS, type DesktopBridge } from '@pdf-atelier/platform'
+import { MENU_COMMAND_CHANNEL, OPEN_REQUEST_CHANNEL, RENDERER_CHANNELS, type DesktopBridge } from '@pdf-atelier/platform'
 
 const allowed = new Set<string>(RENDERER_CHANNELS)
 
@@ -18,6 +18,11 @@ const bridge: DesktopBridge = {
     }
     ipcRenderer.on(MENU_COMMAND_CHANNEL, listener)
     return () => ipcRenderer.off(MENU_COMMAND_CHANNEL, listener)
+  },
+  onOpenRequest(cb) {
+    const listener = () => cb()
+    ipcRenderer.on(OPEN_REQUEST_CHANNEL, listener)
+    return () => ipcRenderer.off(OPEN_REQUEST_CHANNEL, listener)
   },
 }
 
