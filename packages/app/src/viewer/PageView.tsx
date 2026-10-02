@@ -2,6 +2,7 @@ import { rotateSize, type Annotation, type PageModel, type Rotation } from '@pdf
 import { memo, useEffect, useRef } from 'react'
 import { t } from '../i18n/index.ts'
 import type { OpenDoc } from '../stores/documents.ts'
+import { blankSource } from '../files/blank.ts'
 import { AnnotationLayer } from './AnnotationLayer.tsx'
 import { logUnlessAbort, useCanvasRender } from './useCanvasRender.ts'
 
@@ -24,7 +25,8 @@ export const PageView = memo(function PageView({
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const textRef = useRef<HTMLDivElement>(null)
-  const pdf = doc.sources.get(page.sourceId)!.pdf
+  // Blank inserted pages (BLANK_SOURCE) draw nothing; the fallback also covers docs without that entry.
+  const pdf = (doc.sources.get(page.sourceId) ?? blankSource).pdf
   const size = rotateSize(page.width * scale, page.height * scale, rotation)
 
   useCanvasRender(canvasRef, pdf, page.sourceIndex, { scale, rotation })

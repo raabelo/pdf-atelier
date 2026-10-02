@@ -1,9 +1,9 @@
-import type { AnnotationStyle, AnnotationType, Rect, Rotation } from '@pdf-atelier/core'
+import type { AnnotationStyle, AnnotationType, Clipboard, Rect, Rotation } from '@pdf-atelier/core'
 import { create } from 'zustand'
 
 export type Tool = 'select' | AnnotationType
 export type Zoom = number | 'fit-width' | 'fit-page'
-export type Panel = 'pages' | 'outline' | 'annotations' | 'search' | 'tts'
+export type Panel = 'pages' | 'outline' | 'bookmarks' | 'annotations' | 'search' | 'tts'
 
 export interface ViewState {
   zoom: Zoom
@@ -45,6 +45,8 @@ export const defaultStyles: Record<AnnotationType, AnnotationStyle> = {
   ellipse: style('#2563eb'),
   line: style('#111111'),
   arrow: style('#111111'),
+  note: style('#f59e0b'),
+  image: style('#111111'),
 }
 
 export const defaultView: ViewState = { zoom: 'fit-width', rotation: 0, page: 0, scale: 1 }
@@ -66,8 +68,13 @@ interface UiStore {
   views: Record<string, ViewState>
   /** Selected annotation ids in the active document. */
   selection: string[]
-  /** Annotation being edited inline (freetext). */
+  /** Annotation being edited inline (freetext text, note popover). */
   editing: string | null
+  /** In-app annotation clipboard (shared by every tab). */
+  clipboard: Clipboard | null
+  styleClipboard: AnnotationStyle | null
+  /** Insert dialogs (signature pad, stamp picker). */
+  insertDialog: 'signature' | 'stamp' | null
   search: SearchState
   /** Page to scroll to; the viewer consumes it. */
   scrollTo: { docId: string; page: number; nonce: number } | null
@@ -87,6 +94,9 @@ export const useUi = create<UiStore>((set) => ({
   views: {},
   selection: [],
   editing: null,
+  clipboard: null,
+  styleClipboard: null,
+  insertDialog: null,
   search: { query: '', caseSensitive: false, hits: [], active: 0, running: false },
   scrollTo: null,
   confirm: null,

@@ -1,4 +1,5 @@
 import {
+  NOTE_SIZE,
   annotationBounds,
   docOps,
   newId,
@@ -18,6 +19,7 @@ import { t } from '../i18n/index.ts'
 import { usePlatform } from '../platform.ts'
 import { useDocuments, type OpenDoc } from '../stores/documents.ts'
 import { askConfirm, goToPage, useUi, type Tool } from '../stores/ui.ts'
+import { idsInRect, nextSelection } from '../annotations/actions.ts'
 import { Shape } from './shapes.tsx'
 
 /** SVG transform from page coords (unrotated, top-left origin) to view pixels. Mirrors core pageToView. */
@@ -37,7 +39,7 @@ function pageMatrix(w: number, h: number, rotation: Rotation, s: number) {
 type Corner = 'nw' | 'ne' | 'sw' | 'se'
 type Drag =
   | { kind: 'move'; start: Point; at: Point }
-  | { kind: 'resize'; id: string; fixed: Point; at: Point }
+  | { kind: 'resize'; id: string; fixed: Point; at: Point; keepAspect: boolean }
   | { kind: 'draw'; points: Point[] }
 
 const DRAW_TOOLS = new Set<Tool>(['ink', 'rect', 'ellipse', 'line', 'arrow', 'freetext'])
@@ -53,13 +55,43 @@ function corners(r: Rect): Record<Corner, Point> {
 }
 const opposite: Record<Corner, Corner> = { nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' }
 
+/** Dragged corner constrained to the rect's aspect ratio (Shift while resizing). */
+function keepRatio(fixed: Point, at: Point, ratio: number): Point {
+  const dx = at.x - fixed.x
+  const dy = at.y - fixed.y
+  let w = Math.abs(dx)
+  let h = Math.abs(dy)
+  if (w / h > ratio) w = h * ratio
+  else h = w / ratio
+  return { x: fixed.x + Math.sign(dx || 1) * w, y: fixed.y + Math.sign(dy || 1) * h }
+}
+
 /** Applies an in-progress drag to an annotation (preview and commit share this). */
 function dragged(a: Annotation, drag: Drag | null, selection: string[]): Annotation {
   if (drag?.kind === 'move' && selection.includes(a.id))
     return translateAnnotation(a, drag.at.x - drag.start.x, drag.at.y - drag.start.y)
-  if (drag?.kind === 'resize' && drag.id === a.id && 'rect' in a)
-    return { ...a, rect: normalizeRect(drag.fixed, drag.at) }
+  if (drag?.kind === 'resize' && drag.id === a.id && 'rect' in a) {
+    const at =
+      drag.keepAspect && a.rect.height > 0
+        ? keepRatio(drag.fixed, drag.at, a.rect.width / a.rect.height)
+        : drag.at
+    return { ...a, rect: normalizeRect(drag.fixed, at) }
+  }
   return a
+}
+
+/** Sticky note centered on the click. */
+function newNote(pageId: string, p: Point): Annotation {
+  const now = Date.now()
+  return {
+    id: newId(),
+    type: 'note',
+    pageId,
+    at: { x: p.x - NOTE_SIZE / 2, y: p.y - NOTE_SIZE / 2 },
+    style: { ...useUi.getState().styles.note },
+    createdAt: now,
+    updatedAt: now,
+  }
 }
 
 /** Builds the annotation for a finished drawing gesture. */
@@ -105,6 +137,7 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
   const hits = useUi((s) => s.search.hits)
   const activeHit = useUi((s) => s.search.hits[s.search.active])
   const [drag, setDrag] = useState<Drag | null>(null)
+  const [marquee, setMarquee] = useState<Rect | null>(null)
   const [links, setLinks] = useState<PdfLink[]>([])
   const svgRef = useRef<SVGSVGElement>(null)
   const source = doc.sources.get(page.sourceId)
@@ -136,20 +169,52 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
 
   function onAnnotationDown(e: PointerEvent, a: Annotation) {
     if (tool !== 'select' || e.button !== 0) return
-    const sel = e.shiftKey
-      ? [...new Set([...selection, a.id])]
-      : selection.includes(a.id)
-        ? selection
-        : [a.id]
+    const sel = nextSelection(selection, a.id, e.shiftKey || e.ctrlKey || e.metaKey)
     useUi.setState({ selection: sel })
+    if (!sel.includes(a.id)) return e.stopPropagation() // toggled off: nothing to drag
     const p = toPage(e)
     startDrag(e, { kind: 'move', start: p, at: p })
   }
 
   function onBackgroundDown(e: PointerEvent) {
-    if (!DRAW_TOOLS.has(tool) || e.button !== 0) return
+    if (e.button !== 0) return
+    if (tool === 'note') {
+      e.preventDefault()
+      const note = newNote(page.id, toPage(e))
+      change('add note', (d) => docOps.addAnnotations(d, [note]))
+      useUi.setState({ tool: 'select', selection: [note.id], editing: note.id })
+      return
+    }
+    if (!DRAW_TOOLS.has(tool)) return
     startDrag(e, { kind: 'draw', points: [toPage(e)] })
   }
+
+  // Marquee: select tool, drag that starts on the page but not on text, an annotation or an editor.
+  useEffect(() => {
+    const host = svgRef.current?.parentElement
+    if (!host || tool !== 'select') return
+    const onDown = (e: globalThis.PointerEvent) => {
+      const target = e.target as Element
+      if (e.button !== 0 || target.closest('svg g, .textLayer span, textarea, foreignObject')) return
+      e.preventDefault() // no text selection while dragging the marquee
+      ;(document.activeElement as HTMLElement | null)?.blur() // preventDefault also blocks blur: commit open editors
+      const base = e.shiftKey || e.ctrlKey || e.metaKey ? useUi.getState().selection : []
+      const start = toPage(e)
+      const move = (ev: globalThis.PointerEvent) => setMarquee(normalizeRect(start, toPage(ev)))
+      const up = (ev: globalThis.PointerEvent) => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+        setMarquee(null)
+        const r = normalizeRect(start, toPage(ev))
+        if (r.width < 2 && r.height < 2) return
+        useUi.setState({ selection: [...new Set([...base, ...idsInRect(annotations, r)])] })
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+    }
+    host.addEventListener('pointerdown', onDown)
+    return () => host.removeEventListener('pointerdown', onDown)
+  })
 
   function onMove(e: PointerEvent) {
     if (!drag) return
@@ -157,7 +222,9 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
     setDrag(
       drag.kind === 'draw'
         ? { ...drag, points: tool === 'ink' ? [...drag.points, p] : [drag.points[0]!, p] }
-        : { ...drag, at: p },
+        : drag.kind === 'resize'
+          ? { ...drag, at: p, keepAspect: e.shiftKey }
+          : { ...drag, at: p },
     )
   }
 
@@ -215,13 +282,14 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
   const handle = 8 / scale
   const interactive = tool === 'select'
   const pageHits = hits.filter((h) => h.pageId === page.id)
+  const images = doc.history.present.images
 
   return (
     <svg
       ref={svgRef}
       className={cn(
         'absolute inset-0 h-full w-full overflow-visible',
-        DRAW_TOOLS.has(tool) ? 'cursor-crosshair' : 'pointer-events-none',
+        DRAW_TOOLS.has(tool) || tool === 'note' ? 'cursor-crosshair' : 'pointer-events-none',
       )}
       onPointerDown={onBackgroundDown}
       onPointerMove={onMove}
@@ -267,9 +335,11 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
                 interactive && !MARKUP_TOOLS.has(tool) && 'pointer-events-auto cursor-move',
               )}
               onPointerDown={(e) => onAnnotationDown(e, orig)}
-              onDoubleClick={() => a.type === 'freetext' && useUi.setState({ editing: a.id })}
+              onDoubleClick={() =>
+                (a.type === 'freetext' || a.type === 'note') && useUi.setState({ editing: a.id })
+              }
             >
-              <Shape a={a} />
+              <Shape a={a} images={images} />
               <rect
                 x={b.x - pad}
                 y={b.y - pad}
@@ -311,11 +381,25 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
                   id: resizable.id,
                   fixed: corners(resizable.rect)[opposite[c]],
                   at: p,
+                  keepAspect: e.shiftKey,
                 })
               }
             />
           ))}
-        {draft && <Shape a={draft} />}
+        {draft && <Shape a={draft} images={images} />}
+        {marquee && (
+          <rect
+            {...marquee}
+            fill="var(--selection)"
+            fillOpacity={0.08}
+            stroke="var(--selection)"
+            strokeDasharray="4 3"
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
+        {annotations.map(
+          (a) => a.type === 'note' && editing === a.id && <NoteEditor key={`edit-${a.id}`} a={a} />,
+        )}
       </g>
     </svg>
   )
@@ -351,6 +435,39 @@ function FreeTextEditor({ a }: { a: Extract<Annotation, { type: 'freetext' }> })
           fontFamily: 'Helvetica, Arial, sans-serif',
         }}
         className="h-full w-full resize-none bg-white/80 px-0.5 outline outline-1 outline-[var(--selection)]"
+      />
+    </foreignObject>
+  )
+}
+
+function NoteEditor({ a }: { a: Extract<Annotation, { type: 'note' }> }) {
+  const [text, setText] = useState(a.note ?? '')
+  const finish = () => {
+    const { change } = useDocuments.getState()
+    // A note that never got text (and has no thread) is an accidental click: drop it.
+    if (!text.trim() && !a.note && !a.replies?.length)
+      change('delete', (d) => docOps.removeAnnotations(d, [a.id]))
+    else if (text !== (a.note ?? ''))
+      change('edit note', (d) => docOps.updateAnnotation(d, a.id, { note: text }))
+    useUi.setState({ editing: null })
+  }
+  return (
+    <foreignObject
+      x={a.at.x + NOTE_SIZE + 4}
+      y={a.at.y}
+      width={200}
+      height={110}
+      className="pointer-events-auto"
+    >
+      <textarea
+        autoFocus
+        aria-label={t('tool.note')}
+        placeholder={t('note.placeholder')}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={finish}
+        onKeyDown={(e) => e.key === 'Escape' && e.currentTarget.blur()}
+        className="h-full w-full resize-none rounded-md border bg-amber-50 p-1.5 text-xs text-black shadow-md outline-none focus:ring-2 focus:ring-ring"
       />
     </foreignObject>
   )

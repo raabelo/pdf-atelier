@@ -1,4 +1,5 @@
-import type { Annotation, Point } from '@pdf-atelier/core'
+import { NOTE_SIZE, type Annotation, type ImageAsset, type Point } from '@pdf-atelier/core'
+import { imageUrl } from '../annotations/images.ts'
 
 const pathD = (pts: Point[]) => pts.map((p, i) => `${i ? 'L' : 'M'}${p.x} ${p.y}`).join(' ')
 
@@ -9,7 +10,7 @@ function arrowHead(from: Point, to: Point, size: number) {
 }
 
 /** Draws one domain annotation in page coordinates. */
-export function Shape({ a }: { a: Annotation }) {
+export function Shape({ a, images }: { a: Annotation; images: Record<string, ImageAsset> }) {
   const { color, fill, strokeWidth, opacity } = a.style
   const stroke = {
     stroke: color,
@@ -89,6 +90,39 @@ export function Shape({ a }: { a: Annotation }) {
           )}
         </g>
       )
+    case 'note': {
+      const n = NOTE_SIZE
+      // Speech bubble icon (PDF /Text "Comment").
+      return (
+        <g transform={`translate(${a.at.x} ${a.at.y})`} opacity={opacity}>
+          <path
+            d={`M2 2h${n - 4}v${n - 8}h-${n / 2}l-5 5v-5h-${n / 2 - 9}z`}
+            fill={color}
+            stroke="#00000066"
+            strokeWidth={0.75}
+            strokeLinejoin="round"
+          />
+          <path d={`M6 7h${n - 12}M6 10.5h${n - 14}`} stroke="#00000080" strokeWidth={1} />
+        </g>
+      )
+    }
+    case 'image': {
+      const asset = images[a.imageId]
+      const { x, y, width, height } = a.rect
+      return asset ? (
+        <image
+          href={imageUrl(asset)}
+          x={x}
+          y={y}
+          width={width}
+          height={height}
+          opacity={opacity}
+          preserveAspectRatio="none"
+        />
+      ) : (
+        <rect x={x} y={y} width={width} height={height} fill="none" stroke="#999" strokeDasharray="4 3" />
+      )
+    }
     case 'freetext':
       return (
         <foreignObject
