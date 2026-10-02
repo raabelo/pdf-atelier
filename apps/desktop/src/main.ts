@@ -144,6 +144,17 @@ function registerIpc(): void {
     await files.touch(ref)
     return { ref, name: basename(path) }
   })
+  handle('files:export', async (name, bytes, type) => {
+    const r = await dialog.showSaveDialog(win!, {
+      defaultPath: basename(name),
+      filters: [{ name: type.description, extensions: [type.extension] }],
+    })
+    if (r.canceled || !r.filePath) return false
+    const ext = `.${type.extension}`
+    // User-chosen path; never granted a ref or added to recents.
+    await writeAtomic(r.filePath.toLowerCase().endsWith(ext) ? r.filePath : r.filePath + ext, bytes)
+    return true
+  })
   handle('files:openRecent', async (ref) => (files.isRecent(ref) ? openGranted(ref) : null))
   handle('files:listRecent', async () => files.list().map(({ ref, name, openedAt }) => ({ ref, name, openedAt })))
   handle('files:removeRecent', async (ref) => files.remove(ref))

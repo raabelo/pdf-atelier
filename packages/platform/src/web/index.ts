@@ -107,6 +107,19 @@ function fsAccessFiles(): FileSystemAdapter {
       if (!(await ensureWritable(rec.handle))) throw new Error('Write permission denied')
       await write(rec.handle, bytes)
     },
+    async exportFile(suggestedName, bytes, type) {
+      try {
+        const handle = await window.showSaveFilePicker!({
+          suggestedName,
+          types: [{ description: type.description, accept: { [type.mime]: [`.${type.extension}`] } }],
+        } as Parameters<NonNullable<typeof window.showSaveFilePicker>>[0])
+        await write(handle, bytes)
+        return true
+      } catch (e) {
+        if (isAbort(e)) return false
+        throw e
+      }
+    },
     async saveAs(suggestedName, bytes) {
       try {
         const handle = await window.showSaveFilePicker!({ ...PDF_TYPES, suggestedName })
@@ -163,13 +176,12 @@ function fallbackFiles(): FileSystemAdapter {
       throw new Error('Save in place is not supported in this browser')
     },
     async saveAs(suggestedName, bytes) {
-      const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/pdf' }))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = suggestedName
-      a.click()
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+      download(suggestedName, bytes, 'application/pdf')
       return { ref: null, name: suggestedName }
+    },
+    async exportFile(suggestedName, bytes, type) {
+      download(suggestedName, bytes, type.mime)
+      return true
     },
     async openRecent() {
       return null
@@ -192,4 +204,13 @@ const shell: ShellAdapter = {
 export function createWebPlatform(): Platform {
   const hasFsAccess = typeof window.showOpenFilePicker === 'function' && typeof window.showSaveFilePicker === 'function'
   return { files: hasFsAccess ? fsAccessFiles() : fallbackFiles(), shell }
+}
+
+function download(name: string, bytes: Uint8Array, mime: string): void {
+  const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: mime }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }

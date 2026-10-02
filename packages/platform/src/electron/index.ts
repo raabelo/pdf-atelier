@@ -13,6 +13,7 @@ export function createElectronPlatform(bridge: DesktopBridge): Platform {
       },
       save: (ref, bytes) => bridge.invoke('files:save', ref, bytes),
       saveAs: (name, bytes) => bridge.invoke('files:saveAs', name, bytes),
+      exportFile: (name, bytes, type) => bridge.invoke('files:export', name, bytes, type),
       openRecent: (ref) => bridge.invoke('files:openRecent', ref),
       listRecent: () => bridge.invoke('files:listRecent'),
       removeRecent: (ref) => bridge.invoke('files:removeRecent', ref),

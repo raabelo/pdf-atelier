@@ -36,10 +36,24 @@ export interface FileSystemAdapter {
   save(ref: FileRef, bytes: Uint8Array): Promise<void>
   /** Save dialog (or download). ref is null when the result is not writable again. null = cancelled. */
   saveAs(suggestedName: string, bytes: Uint8Array): Promise<{ ref: FileRef | null; name: string } | null>
+  /**
+   * Saves a non-document export (image, zip…) chosen by the user. No ref, not added to recents.
+   * Returns false if cancelled.
+   */
+  exportFile(suggestedName: string, bytes: Uint8Array, type: ExportType): Promise<boolean>
   /** Only when capabilities.reopenRecent. null = file gone or permission denied. */
   openRecent(ref: FileRef): Promise<OpenedFile | null>
   listRecent(): Promise<RecentFile[]>
   removeRecent(ref: FileRef): Promise<void>
+}
+
+export interface ExportType {
+  /** e.g. 'image/png' */
+  mime: string
+  /** Without dot, e.g. 'png' */
+  extension: string
+  /** Shown in the save dialog filter, e.g. 'PNG' */
+  description: string
 }
 
 export interface ShellAdapter {

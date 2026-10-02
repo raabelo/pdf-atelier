@@ -16,6 +16,18 @@ export const ipc = {
     req: z.tuple([z.string().max(255), bytes]),
     res: z.object({ ref: fileRef, name: z.string() }).nullable(),
   },
+  'files:export': {
+    req: z.tuple([
+      z.string().max(255),
+      bytes,
+      z.object({
+        mime: z.string().regex(/^[a-z]+\/[a-z0-9.+-]+$/).max(100),
+        extension: z.string().regex(/^[a-z0-9]{1,8}$/),
+        description: z.string().max(64),
+      }),
+    ]),
+    res: z.boolean(),
+  },
   'files:openRecent': { req: z.tuple([fileRef]), res: opened.nullable() },
   'files:listRecent': {
     req: z.tuple([]),
