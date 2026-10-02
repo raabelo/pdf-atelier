@@ -10,7 +10,9 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@cantoo/fontkit": "^2.0.12",
     "@cantoo/pdf-lib": "^2.11.1",
+    "@fontsource/noto-sans": "^5.3.0",
     "@pdf-atelier/core": "workspace:*",
     "pdfjs-dist": "^6.3.289"
   }

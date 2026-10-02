@@ -11,7 +11,9 @@ import {
   type PDFFont,
   type PDFPage,
 } from '@cantoo/pdf-lib'
+import fontkit from '@cantoo/fontkit'
 import type { Annotation, DocumentModel, Point, Rect } from '@pdf-atelier/core'
+import { loadNotoSans, pdfFontkit } from './fonts.ts'
 
 /** Private key holding the domain annotation JSON, so our annotations round-trip without loss. */
 const ATELIER_KEY = 'PDFAtelier'
@@ -40,8 +42,9 @@ const refKey = (ref: PDFRef) => (ref.generationNumber === 0 ? `${ref.objectNumbe
  * Reads /PDFAtelier JSON from every annotation, keyed by pdf.js-style object id ("12R").
  * pdf.js does not expose custom keys, hence the second parser. The JSON comes from an untrusted file: validated.
  */
-export async function readAtelierAnnotations(bytes: Uint8Array): Promise<Map<string, Annotation>> {
-  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false })
+export async function readAtelierAnnotations(bytes: Uint8Array, password?: string): Promise<Map<string, Annotation>> {
+  // Without the password, encrypted strings stay ciphertext, fail JSON.parse and fall back to the standard fields.
+  const doc = await PDFDocument.load(bytes, { ...(password ? { password } : { ignoreEncryption: true }), updateMetadata: false })
   const out = new Map<string, Annotation>()
   for (const page of doc.getPages()) {
     const annots = page.node.Annots()
@@ -96,17 +99,23 @@ function isValidAnnotation(a: any): a is Annotation {
  * The model is the source of truth for supported annotation types: every such annotation already in the
  * sources is dropped and the model's annotations are written (standard /Annot + /AP + /PDFAtelier JSON).
  */
-export async function exportPdf(doc: DocumentModel, sources: ReadonlyMap<string, Uint8Array>): Promise<Uint8Array> {
+export async function exportPdf(
+  doc: DocumentModel,
+  sources: ReadonlyMap<string, { bytes: Uint8Array; password?: string }>,
+): Promise<Uint8Array> {
   const out = await PDFDocument.create()
+  out.registerFontkit(pdfFontkit)
+  let password: string | undefined
 
   // One copyPages call per source so shared resources (fonts, images) are copied once.
   const wanted = new Map<string, number[]>()
   for (const p of doc.pages) (wanted.get(p.sourceId) ?? wanted.set(p.sourceId, []).get(p.sourceId)!).push(p.sourceIndex)
   const copied = new Map<string, PDFPage[]>()
   for (const [sourceId, indices] of wanted) {
-    const bytes = sources.get(sourceId)
-    if (!bytes) throw new Error(`Missing bytes for source ${sourceId}`)
-    const src = await PDFDocument.load(bytes, { updateMetadata: false })
+    const source = sources.get(sourceId)
+    if (!source) throw new Error(`Missing bytes for source ${sourceId}`)
+    const src = await PDFDocument.load(source.bytes, { updateMetadata: false, ...(source.password && { password: source.password }) })
+    password ??= source.password
     for (const i of new Set(indices)) dropOwnedAnnots(src, src.getPage(i))
     copied.set(sourceId, await out.copyPages(src, indices))
   }
@@ -114,18 +123,75 @@ export async function exportPdf(doc: DocumentModel, sources: ReadonlyMap<string,
   const byPage = new Map<string, Annotation[]>()
   for (const a of Object.values(doc.annotations)) (byPage.get(a.pageId) ?? byPage.set(a.pageId, []).get(a.pageId)!).push(a)
 
-  let font: PDFFont | undefined
+  const fontsFor = textFonts(out)
   for (const p of doc.pages) {
     const page = copied.get(p.sourceId)!.shift()!
     out.addPage(page)
     page.setRotation(degrees(p.rotation))
     for (const a of byPage.get(p.id) ?? []) {
       if (a.type === 'ink' && !a.paths.some((path) => path.length)) continue
-      if (a.type === 'freetext') font ??= await out.embedFont(StandardFonts.Helvetica)
-      page.node.addAnnot(out.context.register(buildAnnot(out, page, a, font)))
+      const fonts = a.type === 'freetext' ? await fontsFor(a.text) : []
+      page.node.addAnnot(out.context.register(buildAnnot(out, page, a, fonts)))
     }
   }
+  // Saving must never silently strip protection: when a source was password-protected, the output is encrypted
+  // with that password as both user and owner password (AES-256, the library default). With several protected
+  // sources, the first one's password is used.
+  if (password) out.encrypt({ userPassword: password, ownerPassword: password })
   return out.save()
+}
+
+interface TextFont {
+  key: string
+  font: PDFFont
+  has: (ch: string) => boolean
+}
+
+/**
+ * Fonts for a FreeText: Helvetica when it encodes every character (WinAnsi), else the Noto Sans subsets the
+ * text needs (latin always, it provides the "?" fallback). Each font is embedded once per export, subset.
+ */
+function textFonts(out: PDFDocument) {
+  let helv: Promise<TextFont> | undefined
+  let noto: Promise<{ bytes: Uint8Array; covers: (ch: string) => boolean }[]> | undefined
+  const embedded = new Map<number, Promise<TextFont>>()
+
+  return async (text: string): Promise<TextFont[]> => {
+    helv ??= out.embedFont(StandardFonts.Helvetica).then((font) => {
+      const charset = new Set(font.getCharacterSet())
+      return { key: 'Helv', font, has: (ch: string) => charset.has(ch.codePointAt(0)!) }
+    })
+    const h = await helv
+    const chars = [...text].filter((ch) => ch !== '\n')
+    if (chars.every(h.has)) return [h]
+
+    noto ??= loadNotoSans().then((all) =>
+      all.map((bytes) => {
+        const fk = fontkit.create(bytes) as import('@cantoo/fontkit').Font // single-font woff, never a collection
+        return { bytes, covers: (ch: string) => fk.hasGlyphForCodePoint(ch.codePointAt(0)!) }
+      }),
+    )
+    const subsets = await noto
+    const needed = new Set([0])
+    for (const ch of chars) {
+      if ([...needed].some((n) => subsets[n]!.covers(ch))) continue
+      const i = subsets.findIndex((s) => s.covers(ch))
+      if (i > 0) needed.add(i)
+    }
+    return Promise.all(
+      [...needed]
+        .sort((x, y) => x - y)
+        .map((i) => {
+          let font = embedded.get(i)
+          if (!font) {
+            const s = subsets[i]!
+            font = out.embedFont(s.bytes, { subset: true }).then((pf) => ({ key: `Noto${i}`, font: pf, has: s.covers }))
+            embedded.set(i, font)
+          }
+          return font
+        }),
+    )
+  }
 }
 
 function dropOwnedAnnots(src: PDFDocument, page: PDFPage) {
@@ -163,7 +229,7 @@ function rgb(color: string | null): [number, number, number] {
   return [((v >> 16) & 255) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255]
 }
 
-function buildAnnot(out: PDFDocument, page: PDFPage, a: Annotation, font: PDFFont | undefined): PDFDict {
+function buildAnnot(out: PDFDocument, page: PDFPage, a: Annotation, fonts: TextFont[]): PDFDict {
   const cb = page.getCropBox()
   const pt = (p: Point): [number, number] => [cb.x + p.x, cb.y + cb.height - p.y]
   const box = (r: Rect): Box => {
@@ -261,14 +327,20 @@ function buildAnnot(out: PDFDocument, page: PDFPage, a: Annotation, font: PDFFon
     case 'freetext': {
       rect = box(a.rect)
       const size = a.fontSize
-      extra.DA = PDFString.of(`/Helv ${f(size)} Tf ${f(r)} ${f(g)} ${f(b)} rg`)
-      resources.Font = { Helv: font!.ref }
-      const lines = wrap(a.text, font!, size, rect[2] - rect[0] - 4)
+      extra.DA = PDFString.of(`/${fonts[0]!.key} ${f(size)} Tf ${f(r)} ${f(g)} ${f(b)} rg`)
+      resources.Font = Object.fromEntries(fonts.map((t) => [t.key, t.font.ref]))
+      const lines = wrap(a.text, fonts, size, rect[2] - rect[0] - 4)
       const lead = size * 1.2
       body = [
         `${f(rect[0])} ${f(rect[1])} ${f(rect[2] - rect[0])} ${f(rect[3] - rect[1])} re W n`,
-        `BT /Helv ${f(size)} Tf ${f(r)} ${f(g)} ${f(b)} rg ${f(lead)} TL ${f(rect[0] + 2)} ${f(rect[3] - 2 - size)} Td`,
-        ...lines.map((l, i) => `${i ? 'T* ' : ''}${font!.encodeText(l).toString()} Tj`),
+        `BT ${f(r)} ${f(g)} ${f(b)} rg ${f(lead)} TL ${f(rect[0] + 2)} ${f(rect[3] - 2 - size)} Td`,
+        ...lines.map(
+          (l, i) =>
+            (i ? 'T* ' : '') +
+            runs(l, fonts)
+              .map((run) => `/${run.font.key} ${f(size)} Tf ${run.font.font.encodeText(run.text).toString()} Tj`)
+              .join(' '),
+        ),
         'ET',
       ].join('\n')
       break
@@ -305,23 +377,28 @@ function stripImport(a: Annotation): Annotation {
   return copy
 }
 
-/** Greedy word wrap with the font's metrics; characters Helvetica/WinAnsi cannot encode become "?". */
-function wrap(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
-  const safe = [...text].map((ch) => {
-    if (ch === '\n') return ch
-    try {
-      font.encodeText(ch)
-      return ch
-    } catch {
-      return '?'
-    }
-  }).join('')
+/** Splits text into same-font runs; characters no font has become "?" in the first font. */
+function runs(text: string, fonts: TextFont[]): { font: TextFont; text: string }[] {
+  const out: { font: TextFont; text: string }[] = []
+  for (const ch of text) {
+    const hit = fonts.find((t) => t.has(ch))
+    const [font, c] = hit ? [hit, ch] : [fonts[0]!, '?']
+    const last = out.at(-1)
+    if (last?.font === font) last.text += c
+    else out.push({ font, text: c })
+  }
+  return out
+}
+
+/** Greedy word wrap using the fonts' metrics. */
+function wrap(text: string, fonts: TextFont[], size: number, maxWidth: number): string[] {
+  const width = (s: string) => runs(s, fonts).reduce((w, r) => w + r.font.font.widthOfTextAtSize(r.text, size), 0)
   const lines: string[] = []
-  for (const para of safe.split('\n')) {
+  for (const para of text.split('\n')) {
     let line = ''
     for (const word of para.split(' ')) {
       const next = line ? `${line} ${word}` : word
-      if (line && font.widthOfTextAtSize(next, size) > maxWidth) {
+      if (line && width(next) > maxWidth) {
         lines.push(line)
         line = word
       } else line = next

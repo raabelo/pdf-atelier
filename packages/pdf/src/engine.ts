@@ -60,7 +60,7 @@ export async function loadPdf(
     const [x1, y1, x2, y2] = page.view as [number, number, number, number]
     pages.push({ width: x2 - x1, height: y2 - y1, rotation: (((page.rotate % 360) + 360) % 360) as Rotation })
   }
-  return new PdfJsSource(opts.id ?? crypto.randomUUID(), doc, pages, bytes)
+  return new PdfJsSource(opts.id ?? crypto.randomUUID(), doc, pages, bytes, opts.password)
 }
 
 class PdfJsSource implements PdfSource {
@@ -73,6 +73,7 @@ class PdfJsSource implements PdfSource {
     private doc: PDFDocumentProxy,
     readonly pages: { width: number; height: number; rotation: Rotation }[],
     private bytes: Uint8Array,
+    private password?: string,
   ) {
     this.pageCount = doc.numPages
   }
@@ -195,13 +196,21 @@ class PdfJsSource implements PdfSource {
         for (const it of items) {
           const itEnd = it.start + it.str.length
           if (itEnd <= at || it.start >= end || !it.str.length) continue
-          // ponytail: assumes horizontal text and uniform glyph width inside an item; good enough for highlights.
+          // ponytail: assumes uniform glyph width inside an item; good enough for highlights.
           const charW = it.width / it.str.length
           const from = Math.max(at, it.start) - it.start
           const to = Math.min(end, itEnd) - it.start
-          const [, , , , e, f] = it.transform as [number, number, number, number, number, number]
-          const h = it.height || Math.hypot(it.transform[2]!, it.transform[3]!)
-          rects.push(toRect(page, [e + from * charW, f - h * 0.2, e + to * charW, f + h * 0.8]))
+          // Rotated text: walk along the baseline direction, then take the axis-aligned bounds of the glyph box.
+          const [a, b, c, d, e, f] = it.transform as [number, number, number, number, number, number]
+          const len = Math.hypot(a, b) || 1
+          const [cos, sin] = [a / len, b / len]
+          const h = it.height || Math.hypot(c, d)
+          const corners = [from * charW, to * charW].flatMap((dist) =>
+            [-0.2, 0.8].map((up) => [e + dist * cos - up * h * sin, f + dist * sin + up * h * cos] as const),
+          )
+          const xs = corners.map((p) => p[0])
+          const ys = corners.map((p) => p[1])
+          rects.push(toRect(page, [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]))
         }
         yield { pageIndex: i, rects, snippet: text.slice(Math.max(0, at - 30), end + 30).replace(/\s+/g, ' ') }
       }
@@ -210,7 +219,7 @@ class PdfJsSource implements PdfSource {
 
   async getAnnotations(index: number, pageId: string): Promise<Annotation[]> {
     const page = await this.#page(index)
-    this.#atelier ??= readAtelierAnnotations(this.bytes).catch(() => new Map())
+    this.#atelier ??= readAtelierAnnotations(this.bytes, this.password).catch(() => new Map())
     const atelier = await this.#atelier
     const result: Annotation[] = []
     for (const a of (await page.getAnnotations()) as PdfJsAnnotation[]) {

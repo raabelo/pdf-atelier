@@ -3,11 +3,25 @@ import { PDFDocument, StandardFonts } from '@cantoo/pdf-lib'
 import { getDocument } from 'pdfjs-dist'
 import type { Annotation, AnnotationStyle, DocumentModel } from '@pdf-atelier/core'
 import { beforeAll, describe, expect, it } from 'vitest'
+import { readFile } from 'node:fs/promises' // eslint-disable-line no-restricted-imports -- test-only font loading
 import { exportPdf, loadPdf, readAtelierAnnotations } from './index.ts'
+import { setFontFetcher } from './fonts.ts'
+
+// Vite asset URLs have no server in node tests: read the font files straight from node_modules.
+setFontFetcher(async (url) => {
+  const name = url.split(/[/?]/).find((p) => p.endsWith('.woff'))!
+  return new Uint8Array(await readFile(new URL(`../../../node_modules/@fontsource/noto-sans/files/${name}`, import.meta.url)))
+})
 
 // pdf.js's modern build expects Uint8Array#toHex (browsers have it; Node 24's V8 does not yet).
 ;(Uint8Array.prototype as any).toHex ??= function (this: Uint8Array) {
   return Array.from(this, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+// Same for Math.sumPrecise (used by pdf.js' AES-256 key derivation).
+;(Math as any).sumPrecise ??= (xs: Iterable<number>) => [...xs].reduce((s, x) => s + x, 0)
+;(Map.prototype as any).getOrInsertComputed ??= function <K, V>(this: Map<K, V>, k: K, fn: (k: K) => V) {
+  if (!this.has(k)) this.set(k, fn(k))
+  return this.get(k)
 }
 
 beforeAll(async () => {
@@ -93,7 +107,7 @@ describe('pdf engine + writer', () => {
       ],
       annotations: Object.fromEntries(anns.map((a) => [a.id, a])),
     }
-    const out = await exportPdf(doc, new Map([['s1', bytes]]))
+    const out = await exportPdf(doc, new Map([['s1', { bytes }]]))
 
     const res = await loadPdf(out)
     expect(res.pageCount).toBe(2)
@@ -141,5 +155,62 @@ describe('pdf engine + writer', () => {
     expect(a).toMatchObject({ type: 'rect', rect: { x: 10, y: 150, width: 40, height: 40 } })
     expect(a!.id).not.toBe('x')
     await src.destroy()
+  })
+
+  it('keeps protection: encrypted source exports encrypted with the same password', async () => {
+    const plain = await PDFDocument.load(await makeSource())
+    plain.encrypt({ userPassword: 's3cret', ownerPassword: 's3cret' })
+    const bytes = await plain.save()
+    await expect(loadPdf(bytes)).rejects.toMatchObject({ name: 'PasswordException' })
+
+    const src = await loadPdf(bytes, { password: 's3cret' })
+    const imported = await src.getAnnotations(0, 'p0')
+    await src.destroy()
+    expect(imported).toHaveLength(1)
+    const ink: Annotation = { ...base, id: 'ink', pageId: 'p0', type: 'ink', paths: [[{ x: 10, y: 10 }, { x: 90, y: 20 }]] }
+    const doc: DocumentModel = {
+      id: 'd',
+      title: 't',
+      sources: { s1: { id: 's1', name: 'a.pdf' } },
+      pages: [{ id: 'p0', sourceId: 's1', sourceIndex: 0, width: 600, height: 800, rotation: 0 }],
+      annotations: Object.fromEntries([...imported, ink].map((a) => [a.id, a])),
+    }
+    const out = await exportPdf(doc, new Map([['s1', { bytes, password: 's3cret' }]]))
+
+    await expect(loadPdf(out)).rejects.toMatchObject({ name: 'PasswordException' })
+    const back = await loadPdf(out, { password: 's3cret' })
+    const got = await back.getAnnotations(0, 'p0')
+    expect(got.map((a) => a.type).sort()).toEqual(['ink', 'rect'])
+    expect(got.find((a) => a.type === 'ink')).toMatchObject({ id: 'ink', paths: ink.type === 'ink' ? ink.paths : [] })
+    await back.destroy()
+  })
+
+  it('writes FreeText outside WinAnsi with embedded Noto Sans subsets', async () => {
+    const bytes = await makeSource()
+    const text = 'Olá ação — Ωμέγα Ж'
+    const ft: Annotation = { ...base, id: 'ft', pageId: 'p0', type: 'freetext', rect: { x: 50, y: 50, width: 200, height: 60 }, text, fontSize: 14 }
+    const doc: DocumentModel = {
+      id: 'd',
+      title: 't',
+      sources: { s1: { id: 's1', name: 'a.pdf' } },
+      pages: [{ id: 'p0', sourceId: 's1', sourceIndex: 0, width: 600, height: 800, rotation: 0 }],
+      annotations: { ft },
+    }
+    const out = await exportPdf(doc, new Map([['s1', { bytes }]]))
+
+    const pdf = await PDFDocument.load(out)
+    const { PDFDict, PDFName } = await import('@cantoo/pdf-lib')
+    const annots = pdf.getPage(0).node.Annots()!
+    const dicts = annots.asArray().map((r) => pdf.context.lookup(r, PDFDict))
+    const freeText = dicts.find((d) => d.get(PDFName.of('Subtype'))?.toString() === '/FreeText')!
+    const ap = pdf.context.lookup(freeText.lookup(PDFName.of('AP'), PDFDict).get(PDFName.of('N'))) as any
+    const fonts = ap.dict.lookup(PDFName.of('Resources'), PDFDict).lookup(PDFName.of('Font'), PDFDict)
+    // latin (with the accents), greek, cyrillic — no Helvetica, and nothing replaced by "?".
+    expect(fonts.keys().map(String).sort()).toEqual(['/Noto0', '/Noto2', '/Noto4'])
+    expect((await readAtelierAnnotations(out)).get([...(await readAtelierAnnotations(out)).keys()][0]!)).toMatchObject({ text })
+
+    // Plain WinAnsi text keeps the standard Helvetica.
+    const out2 = await exportPdf({ ...doc, annotations: { ft: { ...ft, text: 'Olá, ação €' } } }, new Map([['s1', { bytes }]]))
+    expect(new TextDecoder('latin1').decode(out2)).not.toContain('Noto')
   })
 })
