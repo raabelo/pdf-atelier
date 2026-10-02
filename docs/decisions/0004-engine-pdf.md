@@ -23,6 +23,10 @@ PDF.js (`pdfjs-dist` 6.3) para leitura/render/texto/busca/links/import de anota�
 
 ## Consequências
 
+- FreeText com caracteres fora de WinAnsi embute subsets de Noto Sans (OFL, `@fontsource/noto-sans`) via `@cantoo/fontkit`, carregados sob demanda; texto WinAnsi continua em Helvetica.
+- PDF de origem protegido: `exportPdf` recebe a senha por fonte e recriptografa a saída (AES-256, mesma senha como user/owner) — salvar nunca remove a proteção silenciosamente.
+- Impressão é só do app (igual nos dois runtimes): exporta, rasteriza páginas a 150 DPI e chama `window.print()`.
+
 - Bytes originais precisam ser copiados antes de ir ao PDF.js (o worker transfere/destaca o `ArrayBuffer`).
 - Appearance streams (/AP) gerados por nós para cada tipo de anotação.
 - PDFs criptografados/malformados podem abrir no PDF.js e falhar na escrita → modo somente leitura com aviso.

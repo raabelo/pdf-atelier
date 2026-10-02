@@ -60,3 +60,12 @@ Vercel, projeto com **Root Directory** = `apps/web`, preset Vite. CSP e rewrites
 ## Empacotamento desktop
 
 electron-builder, alvo Windows NSIS. Fuses aplicados no build. Sem assinatura de código por enquanto (SmartScreen avisará).
+
+## Instalador Windows
+
+`pnpm --filter @pdf-atelier/desktop dist` → `apps/desktop/release/PDF-Atelier-Setup-<versão>.exe` (NSIS, por usuário, associação `.pdf`, mostra a licença AGPL-3.0). O app desempacotado fica em `release/win-unpacked/`.
+
+## E2E
+
+`pnpm build && pnpm test:e2e` — projeto `web` (Chrome contra `vite preview`) e `desktop` (Electron não empacotado via `_electron`).
+

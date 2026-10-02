@@ -34,6 +34,10 @@ PDFs são entrada não confiável. Um renderer comprometido não pode virar aces
 
 ## Consequências
 
+- "Abrir com"/duplo clique em `.pdf`: main valida o caminho do argv (arquivo regular, `.pdf`, < 1 GB), concede um ref e o renderer puxa via `files:takePending` (pull, sem corrida com o carregamento).
+- Fechar com alterações não salvas: main trata `will-prevent-unload` com diálogo nativo.
+- Com os fuses aplicados, o build empacotado não aceita `--inspect`/Playwright; E2E roda contra o Electron não empacotado.
+
 - Adicionar capacidade nativa exige contrato + schema + handler (ver `development.md`).
 - Electron deve ser atualizado com frequência.
 - Sem assinatura de código no início: aviso do SmartScreen.
