@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@diffusionstudio/piper-wasm": "1.0.0",
     "@mintplex-labs/piper-tts-web": "^1.0.5"
   }
 }
