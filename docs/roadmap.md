@@ -1,6 +1,6 @@
 # Roadmap
 
-## MVP
+## MVP — ✅ concluído (2026-10-02)
 
 **Fundação**
 - Monorepo; web e desktop (Windows) rodando o mesmo build.
@@ -43,7 +43,7 @@
 - Tema claro/escuro/sistema; registro central de atalhos.
 - UI em pt-BR e en (catálogo centralizado).
 
-## V1
+## V1 — ✅ concluído (2026-10-02), exceto i18n lib
 
 - Comentários e respostas; notas.
 - Bookmarks de páginas.
@@ -54,7 +54,7 @@
 - Busca avançada (regex, maiúsculas, palavra inteira).
 - TTS: leitura contínua, detecção automática de idioma.
 - PWA / offline.
-- Biblioteca de i18n completa.
+- ~~Biblioteca de i18n completa~~ — adiada: o catálogo `t()` PT-BR/EN cobre a necessidade atual; adotar lib quando houver plural/formatação complexa ou mais idiomas.
 
 ## V1.5
 
