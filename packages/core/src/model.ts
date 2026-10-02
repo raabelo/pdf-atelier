@@ -57,6 +57,8 @@ interface AnnotationBase {
   author?: string
   /** Comment attached to the annotation (PDF /Contents). */
   note?: string
+  /** Replies thread (exported as /Text annotations with /IRT pointing to this one). */
+  replies?: Reply[]
   /** Set when imported from the PDF file; the writer replaces the original object on save. */
   importedFrom?: { objectId: string }
 }
@@ -92,12 +94,36 @@ export interface FreeTextAnnotation extends AnnotationBase {
   fontSize: number
 }
 
+export interface Reply {
+  id: string
+  author?: string
+  text: string
+  createdAt: number
+}
+
+/** Sticky note (PDF /Text). `at` is the icon's top-left; `note` holds the text. */
+export interface NoteAnnotation extends AnnotationBase {
+  type: 'note'
+  at: Point
+}
+
+/** Raster placed on the page: inserted image, drawn signature or stamp (exported as /Stamp with image /AP). */
+export interface ImageAnnotation extends AnnotationBase {
+  type: 'image'
+  kind: 'image' | 'signature' | 'stamp'
+  rect: Rect
+  /** Key into DocumentModel.images. */
+  imageId: string
+}
+
 export type Annotation =
   | TextMarkupAnnotation
   | InkAnnotation
   | ShapeAnnotation
   | LineAnnotation
   | FreeTextAnnotation
+  | NoteAnnotation
+  | ImageAnnotation
 
 export type AnnotationType = Annotation['type']
 
@@ -108,4 +134,26 @@ export interface DocumentModel {
   sources: Record<string, SourceInfo>
   pages: PageModel[]
   annotations: Record<string, Annotation>
+  /** Image bytes shared by image annotations (deduped by id). */
+  images: Record<string, ImageAsset>
+  /** User page bookmarks (exported as PDF outline entries). */
+  bookmarks: Bookmark[]
 }
+
+export interface ImageAsset {
+  id: string
+  mime: 'image/png' | 'image/jpeg'
+  /** Not drafted/frozen by Immer (typed arrays aren't draftable). Never mutate in place. */
+  data: Uint8Array
+  width: number
+  height: number
+}
+
+export interface Bookmark {
+  id: string
+  pageId: string
+  title: string
+}
+
+/** PageModel.sourceId of pages that have no source PDF (inserted blank pages). */
+export const BLANK_SOURCE = '__blank__'

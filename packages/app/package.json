@@ -16,6 +16,8 @@
     "@tanstack/react-virtual": "^3.14.13",
     "class-variance-authority": "^0.7.1",
     "cn": "^0.4.0",
+    "fflate": "^0.8.3",
+    "franc-min": "^6.2.0",
     "idb": "^8.0.3",
     "immer": "^11.1.18",
     "lucide-react": "^1.50.0",
