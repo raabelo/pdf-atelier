@@ -50,4 +50,6 @@ export interface ShellAdapter {
 export interface Platform {
   files: FileSystemAdapter
   shell: ShellAdapter
+  /** Commands from the native app menu (desktop only), e.g. 'file.open'. Returns unsubscribe. */
+  onNativeCommand?(cb: (commandId: string) => void): () => void
 }
