@@ -40,8 +40,7 @@ export const PageView = memo(function PageView({
       .then((c) => (ctrl.signal.aborted ? c() : (cleanup = c)), logUnlessAbort)
     return () => {
       ctrl.abort()
-      cleanup?.()
-      container.replaceChildren() // a cancelled layer may have appended spans already
+      cleanup?.() // a render still in flight removes its own layer when it sees the abort
     }
   }, [pdf, page.sourceIndex, scale, rotation])
 

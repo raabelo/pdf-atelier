@@ -1,4 +1,5 @@
 import {
+  AbortException,
   AnnotationMode,
   getDocument,
   GlobalWorkerOptions,
@@ -145,26 +146,42 @@ class PdfJsSource implements PdfSource {
     }
   }
 
+  /**
+   * Each call renders into its own `.textLayer` child of `container` and its cleanup removes only that child, so a
+   * stale render (zoom changed while it ran) can never wipe the layer of a newer render.
+   */
   async renderTextLayer(index: number, container: HTMLElement, opts: RenderOptions) {
+    const aborted = () => new DOMException('Text layer cancelled', 'AbortError')
     const page = await this.#page(index)
-    container.classList.add('textLayer')
-    container.style.setProperty('--scale-factor', String(opts.scale))
-    container.style.setProperty('--total-scale-factor', String(opts.scale))
-    container.style.setProperty('--scale-round-x', '1px')
-    container.style.setProperty('--scale-round-y', '1px')
+    if (opts.signal?.aborted) throw aborted() // the abort may land while the page loads
+    const div = document.createElement('div')
+    div.className = 'textLayer'
+    div.style.setProperty('--scale-factor', String(opts.scale))
+    div.style.setProperty('--total-scale-factor', String(opts.scale))
+    div.style.setProperty('--scale-round-x', '1px')
+    div.style.setProperty('--scale-round-y', '1px')
+    container.append(div)
     const layer = new TextLayer({
       textContentSource: page.streamTextContent(),
-      container,
+      container: div,
       viewport: page.getViewport({ scale: opts.scale, rotation: opts.rotation }),
     })
-    opts.signal?.addEventListener('abort', () => layer.cancel(), { once: true })
-    await layer.render()
-    const unbind = bindTextSelection(container)
+    const cancel = () => layer.cancel()
+    opts.signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      await layer.render()
+      if (opts.signal?.aborted) throw aborted()
+    } catch (e) {
+      div.remove()
+      throw e instanceof AbortException ? aborted() : e
+    } finally {
+      opts.signal?.removeEventListener('abort', cancel)
+    }
+    const unbind = bindTextSelection(div)
     return () => {
       unbind()
       layer.cancel()
-      container.replaceChildren()
-      container.classList.remove('selecting')
+      div.remove()
     }
   }
 
