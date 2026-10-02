@@ -18,7 +18,6 @@ import {
   Pencil,
   Printer,
   Redo2,
-  RotateCw,
   Save,
   Square,
   Strikethrough,
@@ -26,8 +25,6 @@ import {
   Type,
   Underline,
   Undo2,
-  ZoomIn,
-  ZoomOut,
   type LucideIcon,
   Shrink,
 } from 'lucide-react'
@@ -68,12 +65,23 @@ const COLORS = [
   '#ffffff',
 ]
 
-function Cmd({ id, icon: Icon, disabled }: { id: string; icon: LucideIcon; disabled?: boolean }) {
+export function Cmd({
+  id,
+  icon: Icon,
+  disabled,
+  className,
+}: {
+  id: string
+  icon: LucideIcon
+  disabled?: boolean
+  className?: string
+}) {
   return (
     <IconButton
       label={t(`cmd.${id}` as MessageKey)}
       shortcut={formatKeys(id)}
       disabled={disabled}
+      className={className}
       onClick={() => runCommand(id)}
     >
       <Icon />
@@ -266,10 +274,6 @@ export function Toolbar() {
       ))}
       <StyleControls />
       <InsertDialogs />
-      <Separator vertical />
-      <Cmd id="view.zoomOut" icon={ZoomOut} disabled={noDoc} />
-      <Cmd id="view.zoomIn" icon={ZoomIn} disabled={noDoc} />
-      <Cmd id="view.rotate" icon={RotateCw} disabled={noDoc} />
       <Separator vertical />
       <PagesMenu disabled={noDoc} />
       <div className="ml-auto" />

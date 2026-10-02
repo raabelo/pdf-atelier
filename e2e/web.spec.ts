@@ -161,3 +161,36 @@ test('compressed copy downloads a smaller, equivalent PDF and reports the gain',
   expect((await PDFDocument.load(bytes)).getPageCount()).toBe(3)
   await expect(page.getByText(/−\d+%/)).toBeVisible()
 })
+
+test('dragging from the gap beside a word selects the whole word at any zoom', async ({ page }) => {
+  await page.goto('/')
+  await dropPdf(page, await makePdf(1), 'sel.pdf')
+  for (const zoom of ['Control+-', 'Control+=', 'Control+=']) {
+    await page.keyboard.press(zoom)
+    const span = page.locator('.textLayer span', { hasText: 'Hello page 1 PDF Atelier' }).first()
+    await expect(span).toBeVisible()
+    const b = (await span.boundingBox())!
+    const y = b.y + b.height / 2
+    await page.mouse.move(b.x - b.height * 0.8, y) // in the gap, left of the text
+    await page.mouse.down()
+    await page.mouse.move(b.x + b.width + b.height * 0.8, y, { steps: 6 }) // past the end, in the gap again
+    await page.mouse.up()
+    expect(await page.evaluate(() => getSelection()!.toString())).toBe('Hello page 1 PDF Atelier')
+    await page.evaluate(() => getSelection()!.removeAllRanges())
+  }
+})
+
+test('status bar: type a page number to jump; view controls live there', async ({ page }) => {
+  await page.goto('/')
+  await dropPdf(page, await makePdf(5), 'nav.pdf')
+  const footer = page.locator('footer')
+  await footer.getByRole('button', { name: /^1$/ }).click()
+  await footer.getByRole('textbox').fill('4')
+  await page.keyboard.press('Enter')
+  await expect(footer.getByRole('button', { name: /^4$/ })).toBeVisible()
+  const zoom = footer.getByText(/^\d+%$/)
+  const before = await zoom.textContent()
+  await footer.getByRole('button', { name: /Aumentar zoom|Zoom in/ }).click()
+  await expect(zoom).not.toHaveText(before!)
+  await expect(page.locator('header').getByRole('button', { name: /Aumentar zoom|Zoom in/ })).toHaveCount(0)
+})

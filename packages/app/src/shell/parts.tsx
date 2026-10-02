@@ -1,5 +1,5 @@
 import { cn } from 'cn'
-import { FileText, FolderOpen, X } from 'lucide-react'
+import { ArrowLeftRight, FileText, FolderOpen, Maximize, RotateCw, X, ZoomIn, ZoomOut } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { RecentFile } from '@pdf-atelier/platform'
 import { runCommand } from '../commands/registry.ts'
@@ -12,9 +12,10 @@ import { SearchPanel } from '../sidebar/SearchPanel.tsx'
 import { AnnotationsPanel } from '../sidebar/AnnotationsPanel.tsx'
 import { Thumbnails } from '../sidebar/Thumbnails.tsx'
 import { isDirty, useActiveDoc, useDocuments } from '../stores/documents.ts'
-import { useUi, type Panel } from '../stores/ui.ts'
+import { goToPage, useUi, type Panel } from '../stores/ui.ts'
 import { useTts } from '../tts/controller.ts'
 import { TtsPanel } from '../tts/TtsPanel.tsx'
+import { Cmd } from './Toolbar.tsx'
 import { Button } from '../ui/button.tsx'
 import { Input } from '../ui/controls.tsx'
 import { Dialog, IconButton } from '../ui/overlays.tsx'
@@ -127,15 +128,7 @@ export function StatusBar() {
     <footer className="flex h-7 shrink-0 items-center gap-4 border-t bg-background px-3 text-xs text-muted-foreground">
       {doc && (
         <>
-          <span>
-            {t('status.page', {
-              n: (view?.page ?? 0) + 1,
-              total: doc.history.present.pages.length,
-            })}
-          </span>
-          <span>
-            {t('status.zoom')}: {Math.round((view?.scale ?? 1) * 100)}%
-          </span>
+          <PageJump docId={doc.id} page={view?.page ?? 0} total={doc.history.present.pages.length} />
           <span>{isDirty(doc) ? t('status.unsaved') : ''}</span>
         </>
       )}
@@ -147,7 +140,66 @@ export function StatusBar() {
       >
         {message?.text}
       </span>
+      {doc && (
+        <div className="flex shrink-0 items-center gap-0.5" role="group" aria-label={t('status.view')}>
+          <Cmd id="view.zoomOut" icon={ZoomOut} className={SMALL} />
+          <span className="w-11 text-center tabular-nums" aria-label={t('status.zoom')}>
+            {Math.round((view?.scale ?? 1) * 100)}%
+          </span>
+          <Cmd id="view.zoomIn" icon={ZoomIn} className={SMALL} />
+          <Cmd id="view.fitWidth" icon={ArrowLeftRight} className={SMALL} />
+          <Cmd id="view.fitPage" icon={Maximize} className={SMALL} />
+          <Cmd id="view.rotate" icon={RotateCw} className={SMALL} />
+        </div>
+      )}
     </footer>
+  )
+}
+
+const SMALL = 'size-6 [&_svg]:size-3.5'
+
+/** "Page [n] of total": the number turns into an input; Enter jumps, Escape/blur cancels. */
+function PageJump({ docId, page, total }: { docId: string; page: number; total: number }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState('')
+  const jump = () => {
+    const n = Number.parseInt(value, 10)
+    if (Number.isFinite(n)) goToPage(docId, Math.min(total, Math.max(1, n)) - 1)
+    setEditing(false)
+  }
+  return (
+    <span className="flex items-center gap-1">
+      {t('status.pageLabel')}
+      {editing ? (
+        <input
+          autoFocus
+          inputMode="numeric"
+          aria-label={t('status.goToPage')}
+          className="h-5 w-12 rounded border bg-background px-1 text-center tabular-nums text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={value}
+          onChange={(e) => setValue(e.target.value.replace(/\D/g, ''))}
+          onFocus={(e) => e.target.select()}
+          onBlur={() => setEditing(false)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') jump()
+            else if (e.key === 'Escape') setEditing(false)
+          }}
+        />
+      ) : (
+        <button
+          type="button"
+          title={t('status.goToPage')}
+          className="min-w-6 rounded px-1 tabular-nums text-foreground hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring outline-none"
+          onClick={() => {
+            setValue(String(page + 1))
+            setEditing(true)
+          }}
+        >
+          {page + 1}
+        </button>
+      )}
+      {t('status.of', { total })}
+    </span>
   )
 }
 
