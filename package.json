@@ -18,7 +18,8 @@
     "test:e2e": "playwright test",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "typecheck": "pnpm -r --parallel typecheck"
+    "typecheck": "pnpm -r --parallel typecheck",
+    "postinstall": "node node_modules/electron/install.js"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
