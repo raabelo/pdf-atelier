@@ -90,7 +90,7 @@ export function TtsPanel() {
       <div className="flex flex-wrap gap-2">
         {state === 'idle' ? (
           <>
-            <Button size="sm" onClick={readSelection}>
+            <Button size="sm" onClick={() => readSelection()}>
               <Play /> {t('tts.readSelection')}
             </Button>
             <Button size="sm" variant="outline" onClick={() => void readFromCurrentPage()}>

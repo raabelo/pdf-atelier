@@ -1,12 +1,13 @@
 import { canRedo, canUndo, docOps } from '@pdf-atelier/core'
 import type { Platform } from '@pdf-atelier/platform'
 import { closeDoc, openWithDialog, save } from '../files/actions.ts'
+import { printDoc } from '../files/print.ts'
 import { activeDoc, useDocuments } from '../stores/documents.ts'
 import { useSettings } from '../stores/settings.ts'
 import { goToPage, updateView, useUi, viewOf, type Tool } from '../stores/ui.ts'
 import {
   readFromCurrentPage,
-  speakText,
+  readSelection,
   stopReading,
   togglePause,
   useTts,
@@ -68,6 +69,18 @@ export function createCommands(platform: Platform): Command[] {
       keys: ['Mod+Shift+S'],
       when: hasDoc,
       run: () => save(platform, activeDoc(), true),
+    },
+    {
+      id: 'file.print',
+      labelKey: 'cmd.file.print',
+      keys: ['Mod+P'],
+      when: () => hasDoc() && !useUi.getState().progress,
+      run: () => printDoc(),
+    },
+    {
+      id: 'help.about',
+      labelKey: 'cmd.help.about',
+      run: () => useUi.setState({ aboutOpen: true }),
     },
     {
       id: 'file.close',
@@ -195,11 +208,7 @@ export function createCommands(platform: Platform): Command[] {
       labelKey: 'cmd.tts.play',
       keys: ['Mod+Shift+R'],
       when: hasDoc,
-      run: () => {
-        const sel = window.getSelection()?.toString() ?? ''
-        if (sel.trim()) return speakText(sel)
-        return readFromCurrentPage()
-      },
+      run: () => (readSelection(true) ? undefined : readFromCurrentPage()),
     },
     {
       id: 'tts.pause',

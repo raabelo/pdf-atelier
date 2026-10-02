@@ -5,7 +5,7 @@ import type { RecentFile } from '@pdf-atelier/platform'
 import { runCommand } from '../commands/registry.ts'
 import { closeDoc, openRecent } from '../files/actions.ts'
 import { t } from '../i18n/index.ts'
-import { usePlatform } from '../platform.tsx'
+import { usePlatform } from '../platform.ts'
 import { AnnotationsPanel, OutlinePanel, SearchPanel } from '../sidebar/panels.tsx'
 import { Thumbnails } from '../sidebar/Thumbnails.tsx'
 import { isDirty, useActiveDoc, useDocuments } from '../stores/documents.ts'
@@ -245,6 +245,83 @@ export function ConfirmDialog() {
           />
         </form>
       )}
+    </Dialog>
+  )
+}
+
+export function ProgressDialog() {
+  const progress = useUi((s) => s.progress)
+  return (
+    <Dialog
+      open={!!progress}
+      onOpenChange={(o) => !o && progress?.cancel()}
+      title={progress?.label ?? ''}
+      footer={
+        <Button variant="outline" onClick={() => progress?.cancel()}>
+          {t('dialog.cancel')}
+        </Button>
+      }
+    >
+      <progress className="mt-4 w-full" value={progress?.value ?? 0} max={1} />
+    </Dialog>
+  )
+}
+
+declare const __APP_VERSION__: string | undefined
+const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'
+const LICENSE_URL = 'https://www.gnu.org/licenses/agpl-3.0.html'
+/** AGPL-3.0 §13: network users must be offered the source. Hidden while empty. */
+const SOURCE_URL = ''
+
+const CREDITS: [string, string][] = [
+  ['PDF.js', 'Apache-2.0'],
+  ['pdf-lib (@cantoo/pdf-lib)', 'MIT'],
+  ['Piper / piper-tts-web', 'MIT / GPL-3.0'],
+  ['espeak-ng', 'GPL-3.0'],
+  ['ONNX Runtime Web', 'MIT'],
+  ['Voz en_US ljspeech', 'Public domain'],
+  ['Voz pt_BR faber', 'CC0'],
+  ['Voz es_ES davefx', 'CC0'],
+  ['Voz fr_FR siwis — SIWIS French Speech Synthesis Database', 'CC BY 4.0'],
+]
+
+export function AboutDialog() {
+  const platform = usePlatform()
+  const open = useUi((s) => s.aboutOpen)
+  const link = (url: string, label: string) => (
+    <button className="text-left underline" onClick={() => void platform.shell.openExternal(url)}>
+      {label}
+    </button>
+  )
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => useUi.setState({ aboutOpen: o })}
+      title={t('app.name')}
+      description={`${t('about.version', { version: APP_VERSION })} — ${t('about.description')}`}
+      footer={<Button onClick={() => useUi.setState({ aboutOpen: false })}>{t('dialog.ok')}</Button>}
+    >
+      <dl className="mt-4 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+        <dt className="text-muted-foreground">{t('about.license')}</dt>
+        <dd>{link(LICENSE_URL, 'AGPL-3.0')}</dd>
+        {SOURCE_URL && (
+          <>
+            <dt className="text-muted-foreground">{t('about.source')}</dt>
+            <dd>{link(SOURCE_URL, SOURCE_URL)}</dd>
+          </>
+        )}
+      </dl>
+      <h3 className="mt-4 mb-1 text-xs font-semibold text-muted-foreground uppercase">
+        {t('about.credits')}
+      </h3>
+      <ul className="max-h-40 space-y-0.5 overflow-auto text-xs">
+        {CREDITS.map(([name, license]) => (
+          <li key={name} className="flex justify-between gap-2">
+            <span>{name}</span>
+            <span className="text-muted-foreground">{license}</span>
+          </li>
+        ))}
+      </ul>
     </Dialog>
   )
 }

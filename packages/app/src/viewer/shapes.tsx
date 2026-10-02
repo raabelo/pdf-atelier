@@ -1,18 +1,4 @@
-import type { Annotation, Point, Rotation } from '@pdf-atelier/core'
-
-/** SVG transform from page coords (unrotated, top-left origin) to view pixels. Mirrors core pageToView. */
-export function pageMatrix(w: number, h: number, rotation: Rotation, s: number) {
-  switch (rotation) {
-    case 90:
-      return `matrix(0 ${s} ${-s} 0 ${h * s} 0)`
-    case 180:
-      return `matrix(${-s} 0 0 ${-s} ${w * s} ${h * s})`
-    case 270:
-      return `matrix(0 ${-s} ${s} 0 0 ${w * s})`
-    default:
-      return `matrix(${s} 0 0 ${s} 0 0)`
-  }
-}
+import type { Annotation, Point } from '@pdf-atelier/core'
 
 const pathD = (pts: Point[]) => pts.map((p, i) => `${i ? 'L' : 'M'}${p.x} ${p.y}`).join(' ')
 

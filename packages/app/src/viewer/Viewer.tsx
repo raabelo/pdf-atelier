@@ -1,11 +1,11 @@
 import { docOps, rotateSize, type Annotation, type Rotation } from '@pdf-atelier/core'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import '@pdf-atelier/pdf/text-layer.css'
 import { useDocuments, type OpenDoc } from '../stores/documents.ts'
 import { useSettings } from '../stores/settings.ts'
 import { updateView, useUi, viewOf } from '../stores/ui.ts'
-import { speakText } from '../tts/controller.ts'
+import { readSelection } from '../tts/controller.ts'
 import { selectionToMarkup } from './markup.ts'
 import { PageView } from './PageView.tsx'
 
@@ -24,10 +24,7 @@ export function Viewer({ doc }: { doc: OpenDoc }) {
   const sizeOf = (i: number) => rotateSize(pages[i]!.width, pages[i]!.height, rotationOf(i))
 
   // Effective scale from the zoom mode and the viewport size.
-  const maxWidth = useMemo(
-    () => Math.max(...pages.map((_, i) => sizeOf(i).width)),
-    [pages, view.rotation],
-  ) // eslint-disable-line react-hooks/exhaustive-deps
+  const maxWidth = Math.max(...pages.map((_, i) => sizeOf(i).width))
   let scale = typeof view.zoom === 'number' ? view.zoom : 1
   if (box.width > 0 && view.zoom === 'fit-width') scale = (box.width - 2 * PAD) / maxWidth
   if (box.width > 0 && view.zoom === 'fit-page' && pages[view.page]) {
@@ -49,6 +46,8 @@ export function Viewer({ doc }: { doc: OpenDoc }) {
     return () => ro.disconnect()
   }, [])
 
+  // React Compiler can't memoize useVirtualizer's API; this component doesn't rely on that.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: pages.length,
     getScrollElement: () => scrollRef.current,
@@ -80,8 +79,11 @@ export function Viewer({ doc }: { doc: OpenDoc }) {
     return m
   }, [model.annotations])
 
+  // Markup made by the double-click of a click sequence: a following triple-click replaces it.
+  const multiClick = useRef<{ ids: string[]; at: number } | null>(null)
+
   // Text selection finished: create markup (markup tools) or read it aloud (auto-read).
-  const onMouseUp = () => {
+  const onMouseUp = (e: MouseEvent) => {
     const { tool, styles } = useUi.getState()
     if (tool === 'highlight' || tool === 'underline' || tool === 'strikeout') {
       const anns = selectionToMarkup(
@@ -91,16 +93,23 @@ export function Viewer({ doc }: { doc: OpenDoc }) {
         styles[tool],
         scrollRef.current!,
       )
-      if (anns.length) {
-        useDocuments.getState().change(tool, (d) => docOps.addAnnotations(d, anns))
-        window.getSelection()?.removeAllRanges()
-      }
+      if (!anns.length) return
+      const prev = multiClick.current
+      const replace = e.detail >= 3 && prev && Date.now() - prev.at < 1000 ? prev.ids : []
+      useDocuments.getState().change(
+        tool,
+        (d) => {
+          docOps.removeAnnotations(d, replace)
+          docOps.addAnnotations(d, anns)
+        },
+        // Same key as the double-click entry: the replacement merges into one undo step.
+        e.detail >= 2 ? { coalesceKey: 'markup-multiclick' } : undefined,
+      )
+      multiClick.current = e.detail >= 2 ? { ids: anns.map((a) => a.id), at: Date.now() } : null
+      window.getSelection()?.removeAllRanges()
       return
     }
-    if (useSettings.getState().tts.autoRead) {
-      const text = window.getSelection()?.toString() ?? ''
-      if (text.trim()) void speakText(text)
-    }
+    if (useSettings.getState().tts.autoRead) readSelection(true)
   }
 
   return (

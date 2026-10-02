@@ -29,6 +29,8 @@ export function Thumbnails({ doc }: { doc: OpenDoc }) {
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
 
+  // React Compiler can't memoize useVirtualizer's API; this component doesn't rely on that.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: pages.length,
     getScrollElement: () => scrollRef.current,

@@ -3,7 +3,7 @@ import { cn } from 'cn'
 import { Slot } from 'radix-ui'
 import type { ComponentProps } from 'react'
 
-export const buttonVariants = cva(
+const buttonVariants = cva(
   'inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-40 [&_svg]:size-4 [&_svg]:shrink-0',
   {
     variants: {

@@ -72,6 +72,9 @@ interface UiStore {
   /** Page to scroll to; the viewer consumes it. */
   scrollTo: { docId: string; page: number; nonce: number } | null
   confirm: Confirm | null
+  /** Long-running cancelable task (printing). value 0..1. */
+  progress: { label: string; value: number; cancel: () => void } | null
+  aboutOpen: boolean
   message: { text: string; error?: boolean } | null
   set(patch: Partial<Omit<UiStore, 'set'>>): void
 }
@@ -87,6 +90,8 @@ export const useUi = create<UiStore>((set) => ({
   search: { query: '', caseSensitive: false, hits: [], active: 0, running: false },
   scrollTo: null,
   confirm: null,
+  progress: null,
+  aboutOpen: false,
   message: null,
   set: (patch) => set(patch),
 }))

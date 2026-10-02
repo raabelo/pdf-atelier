@@ -5,6 +5,7 @@ import {
   undo as undoH,
   type DocumentModel,
   type History,
+  type HistoryEntry,
 } from '@pdf-atelier/core'
 import type { PdfSource } from '@pdf-atelier/pdf'
 import type { FileRef } from '@pdf-atelier/platform'
@@ -15,15 +16,22 @@ export interface OpenSource {
   /** Original file bytes (export always composes from these: non-destructive). */
   bytes: Uint8Array
   pdf: PdfSource
+  /** Password used to open it; the exporter needs it to decrypt. */
+  password?: string
 }
+
+/**
+ * Saved position in the history: the last past entry when saved (null = initial state),
+ * or 'lost' once that position can no longer be reached by undo/redo.
+ */
+export type SavedMark = HistoryEntry | null | 'lost'
 
 export interface OpenDoc {
   id: string
   name: string
   ref: FileRef | null
   history: History<DocumentModel>
-  /** `history.present` at the last save; dirty = present !== saved. */
-  saved: DocumentModel
+  saved: SavedMark
   sources: Map<string, OpenSource>
 }
 
@@ -40,11 +48,20 @@ interface DocumentsStore {
   ): void
   undo(): void
   redo(): void
-  /** `model` = the exact state that was written (edits made during the save stay dirty). */
-  markSaved(id: string, ref: FileRef | null, name: string, model: DocumentModel): void
+  /** `mark` = savedMark() taken when the export started (edits made during the save stay dirty). */
+  markSaved(id: string, ref: FileRef | null, name: string, mark: SavedMark): void
 }
 
-export const isDirty = (d: OpenDoc) => d.history.present !== d.saved
+/** Position-based: undoing back to the saved state clears dirty. */
+export const savedMark = (h: History<DocumentModel>): SavedMark => h.past.at(-1) ?? null
+export const isDirty = (d: OpenDoc) => savedMark(d.history) !== d.saved
+
+/** After a new change, the saved position is unreachable if its entry left `past` or was dropped by the cap. */
+function keepMark(saved: SavedMark, prev: HistoryEntry[], next: HistoryEntry[]): SavedMark {
+  if (saved === 'lost') return saved
+  if (saved === null) return prev.length >= 2 && next[0] === prev[1] ? 'lost' : null
+  return next.includes(saved) ? saved : 'lost'
+}
 
 export const newOpenDoc = (
   model: DocumentModel,
@@ -56,7 +73,7 @@ export const newOpenDoc = (
   name,
   ref,
   history: createHistory(model),
-  saved: model,
+  saved: null,
   sources,
 })
 
@@ -81,12 +98,16 @@ export const useDocuments = create<DocumentsStore>((set, get) => {
     },
     setActive: (id) => set({ activeId: id }),
     change: (label, recipe, opts) =>
-      updateActive((d) => ({ ...d, history: applyChange(d.history, label, recipe, opts) })),
+      updateActive((d) => {
+        const history = applyChange(d.history, label, recipe, opts)
+        if (history === d.history) return d
+        return { ...d, history, saved: keepMark(d.saved, d.history.past, history.past) }
+      }),
     undo: () => updateActive((d) => ({ ...d, history: undoH(d.history) })),
     redo: () => updateActive((d) => ({ ...d, history: redoH(d.history) })),
-    markSaved: (id, ref, name, model) =>
+    markSaved: (id, ref, name, mark) =>
       set((s) => ({
-        docs: s.docs.map((d) => (d.id === id ? { ...d, ref, name, saved: model } : d)),
+        docs: s.docs.map((d) => (d.id === id ? { ...d, ref, name, saved: mark } : d)),
       })),
   }
 })

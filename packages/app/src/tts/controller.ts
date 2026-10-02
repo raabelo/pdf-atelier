@@ -3,7 +3,8 @@ import { create } from 'zustand'
 import { t } from '../i18n/index.ts'
 import { activeDoc } from '../stores/documents.ts'
 import { useSettings } from '../stores/settings.ts'
-import { notify, viewOf } from '../stores/ui.ts'
+import { goToPage, notify, viewOf } from '../stores/ui.ts'
+import { rangeAt, showSegment, textOfRange, type MappedText } from './highlight.ts'
 
 interface TtsStore {
   state: TtsEngine['state']
@@ -27,9 +28,10 @@ let engine: Promise<TtsEngine> | null = null
 export function getEngine() {
   engine ??= import('@pdf-atelier/tts').then(({ createTtsEngine }) => {
     const e = createTtsEngine({ assetsBaseUrl: './tts/' })
-    e.subscribe(() =>
-      useTts.setState({ state: e.state, ...(e.state === 'idle' && { current: null }) }),
-    )
+    e.subscribe(() => {
+      useTts.setState({ state: e.state, ...(e.state === 'idle' && { current: null }) })
+      if (e.state === 'idle') showSegment(null)
+    })
     return e
   })
   return engine
@@ -64,35 +66,58 @@ export async function removeVoice(id: string) {
 
 let reading = 0
 
-async function speak(text: string) {
+async function speak(m: MappedText, follow: boolean): Promise<'ended' | 'stopped'> {
   const e = await getEngine()
   const { lang, voiceId, rate } = useSettings.getState().tts
   const voice = await e.resolveVoice(lang, voiceId ?? undefined)
   // First use of a Piper voice downloads it (user decision: on-demand download, stored locally).
   if (voice?.provider === 'piper' && !voice.installed) await installVoice(voice.id)
-  await e.speak(text, {
+  return e.speak(m.text, {
     lang,
     rate,
     ...(voice && { voiceId: voice.id }),
-    onSegment: ({ start, end }) => useTts.setState({ current: { text, start, end } }),
+    onSegment: ({ start, end }) => {
+      useTts.setState({ current: { text: m.text, start, end } })
+      showSegment(rangeAt(m, start, end), follow)
+    },
   })
 }
 
-export async function speakText(text: string) {
+async function speakMapped(m: MappedText) {
   const run = ++reading
-  if (!text.trim()) return
+  if (!m.text.trim()) return
   try {
-    await speak(text)
+    await speak(m, false)
   } catch (e) {
-    if (run === reading)
-      notify(t('tts.error', { message: e instanceof Error ? e.message : String(e) }), true)
+    if (run === reading) notify(t('tts.error', { message: errorText(e) }), true)
   }
 }
 
-export function readSelection() {
-  const text = window.getSelection()?.toString() ?? ''
-  if (text.trim()) void speakText(text)
-  else notify(t('tts.noSelection'))
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e))
+
+/** Plain text (no highlight mapping). */
+export const speakText = (text: string) => speakMapped({ text, pieces: [] })
+
+/** Reads the current selection, highlighting each sentence in place. false = nothing selected. */
+export function readSelection(silent = false): boolean {
+  const sel = window.getSelection()
+  const m = sel && sel.rangeCount && !sel.isCollapsed ? textOfRange(sel.getRangeAt(0)) : null
+  if (m?.text.trim()) {
+    void speakMapped(m)
+    return true
+  }
+  if (!silent) notify(t('tts.noSelection'))
+  return false
+}
+
+/** Waits (up to ~3s) for a page's text layer to be rendered after scrolling to it. */
+async function textLayerOf(pageId: string): Promise<HTMLElement | null> {
+  for (let i = 0; i < 180; i++) {
+    const el = document.querySelector<HTMLElement>(`[data-page-id="${pageId}"] .textLayer`)
+    if (el?.querySelector('span')) return el
+    await new Promise(requestAnimationFrame)
+  }
+  return null
 }
 
 /** Continuous reading: current page, then the following ones, until stopped. */
@@ -103,16 +128,24 @@ export async function readFromCurrentPage() {
   const pages = doc.history.present.pages
   for (let i = viewOf(doc.id).page; i < pages.length && run === reading; i++) {
     const p = pages[i]!
-    const text = await doc.sources.get(p.sourceId)!.pdf.getPageText(p.sourceIndex)
+    goToPage(doc.id, i)
+    const layer = await textLayerOf(p.id)
+    let m: MappedText
+    if (layer) {
+      const r = document.createRange()
+      r.selectNodeContents(layer)
+      m = textOfRange(r)
+    } else {
+      m = { text: await doc.sources.get(p.sourceId)!.pdf.getPageText(p.sourceIndex), pieces: [] }
+    }
     if (run !== reading) return
+    if (!m.text.trim()) continue
     try {
-      await speak(text)
+      if ((await speak(m, true)) === 'stopped' || run !== reading) return
     } catch (e) {
-      notify(t('tts.error', { message: e instanceof Error ? e.message : String(e) }), true)
+      notify(t('tts.error', { message: errorText(e) }), true)
       return
     }
-    // ponytail: no reliable "finished vs stopped" signal from speak(); state is idle in both cases
-    if (run !== reading) return
   }
 }
 

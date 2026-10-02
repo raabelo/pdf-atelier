@@ -2,13 +2,21 @@ import type { Platform } from '@pdf-atelier/platform'
 import { useEffect, useState } from 'react'
 import { createCommands } from '../commands/commands.ts'
 import { handleKeyDown, registerCommands, runCommand } from '../commands/registry.ts'
-import { openDropped } from '../files/actions.ts'
-import { PlatformProvider } from '../platform.tsx'
+import { openDropped, openFile } from '../files/actions.ts'
+import { PlatformProvider } from '../platform.ts'
 import { isDirty, useActiveDoc, useDocuments } from '../stores/documents.ts'
 import { loadSettings, useSettings } from '../stores/settings.ts'
 import { TooltipProvider } from '../ui/overlays.tsx'
 import { Viewer } from '../viewer/Viewer.tsx'
-import { ConfirmDialog, EmptyState, Sidebar, StatusBar, TabsBar } from './parts.tsx'
+import {
+  AboutDialog,
+  ConfirmDialog,
+  EmptyState,
+  ProgressDialog,
+  Sidebar,
+  StatusBar,
+  TabsBar,
+} from './parts.tsx'
 import { Toolbar } from './Toolbar.tsx'
 
 function useTheme() {
@@ -38,6 +46,8 @@ export function App({ platform }: { platform: Platform }) {
     window.addEventListener('keydown', handleKeyDown)
     // Native menu (desktop) runs the same commands as toolbar and shortcuts.
     const unmenu = platform.onNativeCommand?.(runCommand)
+    // Files handed over by the OS (desktop: "Open with", second instance).
+    const unopen = platform.onOpenFile?.((f) => void openFile(f))
     const beforeUnload = (e: BeforeUnloadEvent) => {
       if (useDocuments.getState().docs.some(isDirty)) e.preventDefault()
     }
@@ -45,6 +55,7 @@ export function App({ platform }: { platform: Platform }) {
     return () => {
       unregister()
       unmenu?.()
+      unopen?.()
       window.removeEventListener('keydown', handleKeyDown)
       window.removeEventListener('beforeunload', beforeUnload)
     }
@@ -55,7 +66,7 @@ export function App({ platform }: { platform: Platform }) {
   }, [locale])
 
   return (
-    <PlatformProvider platform={platform}>
+    <PlatformProvider value={platform}>
       <TooltipProvider delayDuration={400}>
         {/* key: remount on locale change so every t() call re-reads the catalog */}
         <div
@@ -88,6 +99,8 @@ export function App({ platform }: { platform: Platform }) {
           </div>
           <StatusBar />
           <ConfirmDialog />
+          <ProgressDialog />
+          <AboutDialog />
         </div>
       </TooltipProvider>
     </PlatformProvider>

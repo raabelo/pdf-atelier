@@ -98,3 +98,37 @@
     overflow: hidden;
   }
 }
+
+/* Printing (files/print.ts): only the rasterized pages, one per sheet. */
+#print-root {
+  display: none;
+}
+@media print {
+  @page {
+    margin: 0;
+  }
+  html,
+  body,
+  #root {
+    height: auto;
+    overflow: visible;
+  }
+  body > :not(#print-root) {
+    display: none !important;
+  }
+  #print-root {
+    display: block;
+  }
+  #print-root img {
+    display: block;
+    width: 100%;
+    height: 100vh;
+    object-fit: contain;
+    break-after: page;
+  }
+}
+
+/* Sentence being read aloud (CSS Custom Highlight API, set by tts/highlight.ts). */
+::highlight(tts) {
+  background-color: rgb(59 130 246 / 0.35);
+}

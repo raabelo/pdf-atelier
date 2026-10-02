@@ -3,6 +3,7 @@ import {
   ArrowUpRight,
   Circle,
   FolderOpen,
+  Info,
   Highlighter,
   Minus,
   Monitor,
@@ -10,6 +11,7 @@ import {
   MousePointer2,
   PanelLeft,
   Pencil,
+  Printer,
   Redo2,
   RotateCw,
   Save,
@@ -206,6 +208,7 @@ export function Toolbar() {
       <Separator vertical />
       <Cmd id="file.open" icon={FolderOpen} />
       <Cmd id="file.save" icon={Save} disabled={noDoc} />
+      <Cmd id="file.print" icon={Printer} disabled={noDoc} />
       <Separator vertical />
       <Cmd id="edit.undo" icon={Undo2} disabled={!doc || !canUndo(doc.history)} />
       <Cmd id="edit.redo" icon={Redo2} disabled={!doc || !canRedo(doc.history)} />
@@ -228,6 +231,7 @@ export function Toolbar() {
       <Cmd id="view.zoomIn" icon={ZoomIn} disabled={noDoc} />
       <Cmd id="view.rotate" icon={RotateCw} disabled={noDoc} />
       <div className="ml-auto" />
+      <Cmd id="help.about" icon={Info} />
       <IconButton
         label={`${t('cmd.view.toggleTheme')}: ${t(`theme.${theme}`)}`}
         onClick={() => runCommand('view.toggleTheme')}

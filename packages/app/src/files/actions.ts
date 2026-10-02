@@ -2,7 +2,14 @@ import { createDocument, type Annotation } from '@pdf-atelier/core'
 import { exportPdf, loadPdf } from '@pdf-atelier/pdf'
 import type { OpenedFile, Platform } from '@pdf-atelier/platform'
 import { t } from '../i18n/index.ts'
-import { activeDoc, isDirty, newOpenDoc, useDocuments, type OpenDoc } from '../stores/documents.ts'
+import {
+  activeDoc,
+  isDirty,
+  newOpenDoc,
+  savedMark,
+  useDocuments,
+  type OpenDoc,
+} from '../stores/documents.ts'
 import { askConfirm, askPassword, notify } from '../stores/ui.ts'
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e))
@@ -12,7 +19,8 @@ async function loadWithPassword(file: OpenedFile) {
   let password: string | undefined
   for (;;) {
     try {
-      return await loadPdf(file.bytes, password === undefined ? {} : { password })
+      const pdf = await loadPdf(file.bytes, password === undefined ? {} : { password })
+      return { pdf, password }
     } catch (e) {
       if (!(e instanceof Error && e.name === 'PasswordException')) throw e
       const p = await askPassword(
@@ -28,8 +36,9 @@ async function loadWithPassword(file: OpenedFile) {
 
 export async function openFile(file: OpenedFile) {
   try {
-    const pdf = await loadWithPassword(file)
-    if (!pdf) return
+    const loaded = await loadWithPassword(file)
+    if (!loaded) return
+    const { pdf, password } = loaded
     const model = createDocument({
       title: file.name,
       source: { id: pdf.id, name: file.name },
@@ -40,7 +49,14 @@ export async function openFile(file: OpenedFile) {
     model.annotations = Object.fromEntries(imported.flat().map((a: Annotation) => [a.id, a]))
     useDocuments
       .getState()
-      .add(newOpenDoc(model, file.name, file.ref, new Map([[pdf.id, { bytes: file.bytes, pdf }]])))
+      .add(
+        newOpenDoc(
+          model,
+          file.name,
+          file.ref,
+          new Map([[pdf.id, { bytes: file.bytes, pdf, ...(password !== undefined && { password }) }]]),
+        ),
+      )
   } catch (e) {
     notify(t('error.open', { name: file.name, message: message(e) }), true)
   }
@@ -64,21 +80,28 @@ export async function openRecent(platform: Platform, ref: string) {
   else notify(t('error.open', { name: ref, message: 'not found' }), true)
 }
 
+/** Composes the current model into PDF bytes (non-destructive: always from the original sources). */
+export const exportDoc = (doc: OpenDoc) =>
+  exportPdf(
+    doc.history.present,
+    new Map([...doc.sources].map(([id, s]) => [id, { bytes: s.bytes, password: s.password }])),
+  )
+
 export async function save(
   platform: Platform,
   doc: OpenDoc | undefined = activeDoc(),
   forceDialog = false,
 ) {
   if (!doc) return
-  const model = doc.history.present
+  const mark = savedMark(doc.history)
   try {
-    const bytes = await exportPdf(model, new Map([...doc.sources].map(([id, s]) => [id, s.bytes])))
+    const bytes = await exportDoc(doc)
     if (doc.ref && platform.files.capabilities.saveInPlace && !forceDialog) {
       await platform.files.save(doc.ref, bytes)
-      useDocuments.getState().markSaved(doc.id, doc.ref, doc.name, model)
+      useDocuments.getState().markSaved(doc.id, doc.ref, doc.name, mark)
     } else {
       const result = await platform.files.saveAs(doc.name, bytes)
-      if (result) useDocuments.getState().markSaved(doc.id, result.ref, result.name, model)
+      if (result) useDocuments.getState().markSaved(doc.id, result.ref, result.name, mark)
     }
     notify(t('status.saved'))
   } catch (e) {

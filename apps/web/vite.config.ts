@@ -4,11 +4,13 @@ import { dirname, join, resolve } from 'node:path'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
 import { pathToFileURL } from 'node:url'
-import { defineConfig, type Plugin } from 'vite'
+import { defaultClientConditions, defineConfig, type Plugin } from 'vite'
 
 const root = resolve(import.meta.dirname, '../..')
 const require = createRequire(join(root, 'packages/pdf/package.json'))
 const pdfjsDir = dirname(require.resolve('pdfjs-dist/package.json'))
+/** Single version source: the desktop package (installer version). */
+const version = (JSON.parse(readFileSync(join(root, 'apps/desktop/package.json'), 'utf8')) as { version: string }).version
 
 /** Static runtime assets: pdf.js data files under /pdfjs/, self-hosted TTS wasm under /tts/. */
 async function assetMap(): Promise<{ from: string; to: string }[]> {
@@ -50,6 +52,8 @@ function runtimeAssets(): Plugin {
         const abs = files.get(path)
         if (!abs) return next()
         if (abs.endsWith('.wasm')) res.setHeader('Content-Type', 'application/wasm')
+        // Module scripts (onnxruntime's .mjs loader) are rejected without a JS MIME type.
+        if (abs.endsWith('.mjs')) res.setHeader('Content-Type', 'text/javascript')
         createReadStream(abs).pipe(res)
       })
     },
@@ -62,7 +66,10 @@ function runtimeAssets(): Plugin {
 
 export default defineConfig({
   base: './',
+  define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [react(), tailwindcss(), runtimeAssets()],
+  // onnxruntime-web: use the build that loads its wasm from wasmPaths (/tts/ort/) instead of bundling a 2nd copy.
+  resolve: { conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions] },
   worker: { format: 'es' },
   optimizeDeps: { exclude: ['onnxruntime-web', '@mintplex-labs/piper-tts-web'] },
   server: { fs: { allow: [root] } },
