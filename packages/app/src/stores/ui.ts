@@ -63,6 +63,8 @@ interface Confirm {
 interface UiStore {
   tool: Tool
   styles: Record<AnnotationType, AnnotationStyle>
+  /** Default font size (pt) for new text boxes. */
+  fontSize: number
   sidebarOpen: boolean
   panel: Panel
   views: Record<string, ViewState>
@@ -89,6 +91,7 @@ interface UiStore {
 export const useUi = create<UiStore>((set) => ({
   tool: 'select',
   styles: defaultStyles,
+  fontSize: 14,
   sidebarOpen: typeof window === 'undefined' || window.innerWidth >= 900,
   panel: 'pages',
   views: {},

@@ -114,7 +114,7 @@ function fromGesture(tool: Tool, points: Point[], pageId: string): Annotation | 
       const rect = tiny
         ? { x: first.x, y: first.y, width: 180, height: 32 }
         : normalizeRect(first, last)
-      return { ...base, type: 'freetext', rect, text: '', fontSize: 14 }
+      return { ...base, type: 'freetext', rect, text: '', fontSize: useUi.getState().fontSize }
     }
     default:
       return null

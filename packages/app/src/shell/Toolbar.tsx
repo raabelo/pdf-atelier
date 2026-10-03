@@ -94,6 +94,7 @@ function StyleControls() {
   const styles = useUi((s) => s.styles)
   const selection = useUi((s) => s.selection)
   const styleClip = useUi((s) => s.styleClipboard)
+  const defaultFontSize = useUi((s) => s.fontSize)
   const doc = useActiveDoc()
   const selected = selection.map((id) => doc?.history.present.annotations[id]).filter((a) => !!a)
   const type: AnnotationType = selected[0]?.type ?? (tool === 'select' ? 'rect' : tool)
@@ -112,6 +113,20 @@ function StyleControls() {
               docOps.updateAnnotation(d, a.id, { style: { ...a.style, ...patch } }),
             ),
           { coalesceKey: `style:${selection.join()}` },
+        )
+  }
+
+  const texts = selected.filter((a) => a.type === 'freetext')
+  const fontSize = texts[0]?.fontSize ?? defaultFontSize
+  const applyFontSize = (size: number) => {
+    useUi.setState({ fontSize: size })
+    if (texts.length)
+      useDocuments
+        .getState()
+        .change(
+          'font size',
+          (d) => texts.forEach((a) => docOps.updateAnnotation(d, a.id, { fontSize: size })),
+          { coalesceKey: `fontSize:${selection.join()}` },
         )
   }
 
@@ -172,6 +187,21 @@ function StyleControls() {
               ))}
             </div>
           </fieldset>
+        )}
+        {type === 'freetext' && (
+          <div>
+            <span className="text-xs text-muted-foreground">
+              {t('style.fontSize')}: {fontSize}pt
+            </span>
+            <Slider
+              label={t('style.fontSize')}
+              min={6}
+              max={72}
+              step={1}
+              value={[fontSize]}
+              onValueChange={([v]) => applyFontSize(v!)}
+            />
+          </div>
         )}
         <div>
           <span className="text-xs text-muted-foreground">
