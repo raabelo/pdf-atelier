@@ -29,6 +29,7 @@ import {
   type LucideIcon,
   Shrink,
 } from 'lucide-react'
+import { cn } from 'cn'
 import { formatKeys, runCommand } from '../commands/registry.ts'
 import { t, type MessageKey } from '../i18n/index.ts'
 import { useActiveDoc, useDocuments } from '../stores/documents.ts'
@@ -139,11 +140,20 @@ function StyleControls() {
   return (
     <Popover
       trigger={
-        <Button variant="ghost" size="icon" aria-label={t('style.title')}>
+        <Button variant="ghost" size="icon" aria-label={t('style.title')} className="relative">
           <span
             className="size-4 rounded-full border"
             style={{ background: style.color, opacity: style.opacity }}
           />
+          {/* Badge: hints that text options (font size) live here too. */}
+          <span
+            aria-hidden
+            className={cn(
+              'absolute bottom-1 left-1.25 rounded-sm px-0.5 font-serif text-[10px] leading-none font-bold text-foreground',
+            )}
+          >
+            A
+          </span>
         </Button>
       }
     >
