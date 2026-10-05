@@ -55,6 +55,29 @@ function corners(r: Rect): Record<Corner, Point> {
 }
 const opposite: Record<Corner, Corner> = { nw: 'se', ne: 'sw', sw: 'ne', se: 'nw' }
 
+const FREETEXT_FONT = 'Helvetica, Arial, sans-serif'
+let measureCtx: CanvasRenderingContext2D | null | undefined
+
+// Pointer capture on the svg retargets click/dblclick away from the pressed element: detect double presses by hand.
+let lastPress = { key: '', time: 0 }
+function isDoublePress(key: string, time: number) {
+  const double = lastPress.key === key && time - lastPress.time < 400
+  lastPress = { key: double ? '' : key, time }
+  return double
+}
+
+/** Rect hugging a text box's content (top-left kept); mirrors the Shape layout: 1.2 line height, 2px side padding. */
+function fitText(a: Extract<Annotation, { type: 'freetext' }>): Rect {
+  measureCtx ??= document.createElement('canvas').getContext('2d')
+  const lines = a.text.split('\n')
+  const ctx = measureCtx
+  if (ctx) ctx.font = `${a.fontSize}px ${FREETEXT_FONT}`
+  const width = Math.max(
+    ...lines.map((l) => (ctx ? ctx.measureText(l).width : l.length * a.fontSize * 0.6)),
+  )
+  return { x: a.rect.x, y: a.rect.y, width: width + 6, height: lines.length * a.fontSize * 1.2 + 2 }
+}
+
 /** Dragged corner constrained to the rect's aspect ratio (Shift while resizing). */
 function keepRatio(fixed: Point, at: Point, ratio: number): Point {
   const dx = at.x - fixed.x
@@ -169,6 +192,10 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
 
   function onAnnotationDown(e: PointerEvent, a: Annotation) {
     if (tool !== 'select' || e.button !== 0) return
+    if (isDoublePress(a.id, e.timeStamp) && (a.type === 'freetext' || a.type === 'note')) {
+      e.stopPropagation()
+      return useUi.setState({ selection: [a.id], editing: a.id })
+    }
     const sel = nextSelection(selection, a.id, e.shiftKey || e.ctrlKey || e.metaKey)
     useUi.setState({ selection: sel })
     if (!sel.includes(a.id)) return e.stopPropagation() // toggled off: nothing to drag
@@ -196,7 +223,8 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
     if (!host || tool !== 'select') return
     const onDown = (e: globalThis.PointerEvent) => {
       const target = e.target as Element
-      if (e.button !== 0 || target.closest('svg g, .textLayer span, textarea, foreignObject')) return
+      if (e.button !== 0 || target.closest('svg g, .textLayer span, textarea, foreignObject'))
+        return
       if (!e.altKey && nearText(host, e.clientX, e.clientY)) return
       e.preventDefault() // no text selection while dragging the marquee
       ;(document.activeElement as HTMLElement | null)?.blur() // preventDefault also blocks blur: commit open editors
@@ -337,9 +365,6 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
                 interactive && !MARKUP_TOOLS.has(tool) && 'pointer-events-auto cursor-move',
               )}
               onPointerDown={(e) => onAnnotationDown(e, orig)}
-              onDoubleClick={() =>
-                (a.type === 'freetext' || a.type === 'note') && useUi.setState({ editing: a.id })
-              }
             >
               <Shape a={a} images={images} />
               <rect
@@ -377,7 +402,17 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
               vectorEffect="non-scaling-stroke"
               aria-label={`resize ${c}`}
               className="pointer-events-auto cursor-nwse-resize"
-              onPointerDown={(e) =>
+              onPointerDown={(e) => {
+                if (
+                  isDoublePress(`resize:${resizable.id}`, e.timeStamp) &&
+                  resizable.type === 'freetext'
+                ) {
+                  e.stopPropagation()
+                  const rect = fitText(resizable)
+                  return change('fit text', (d) =>
+                    docOps.updateAnnotation(d, resizable.id, { rect }),
+                  )
+                }
                 startDrag(e, {
                   kind: 'resize',
                   id: resizable.id,
@@ -385,7 +420,7 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
                   at: p,
                   keepAspect: e.shiftKey,
                 })
-              }
+              }}
             />
           ))}
         {draft && <Shape a={draft} images={images} />}
@@ -434,7 +469,7 @@ function FreeTextEditor({ a }: { a: Extract<Annotation, { type: 'freetext' }> })
           fontSize: a.fontSize,
           color: a.style.color,
           lineHeight: 1.2,
-          fontFamily: 'Helvetica, Arial, sans-serif',
+          fontFamily: FREETEXT_FONT,
         }}
         className="h-full w-full resize-none bg-white/80 px-0.5 outline outline-1 outline-[var(--selection)]"
       />
