@@ -91,7 +91,7 @@ interface UiStore {
 export const useUi = create<UiStore>((set) => ({
   tool: 'select',
   styles: defaultStyles,
-  fontSize: 14,
+  fontSize: 10,
   sidebarOpen: typeof window === 'undefined' || window.innerWidth >= 900,
   panel: 'pages',
   views: {},

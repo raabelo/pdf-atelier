@@ -204,21 +204,20 @@ function StyleControls() {
             </div>
           </fieldset>
         )}
-        {type === 'freetext' && (
-          <div>
-            <span className="text-xs text-muted-foreground">
-              {t('style.fontSize')}: {fontSize}pt
-            </span>
-            <Slider
-              label={t('style.fontSize')}
-              min={6}
-              max={72}
-              step={1}
-              value={[fontSize]}
-              onValueChange={([v]) => applyFontSize(v!)}
-            />
-          </div>
-        )}
+        {/* Always shown: without text boxes selected it sets the default for new ones. */}
+        <div>
+          <span className="text-xs text-muted-foreground">
+            {t('style.fontSize')}: {fontSize}pt
+          </span>
+          <Slider
+            label={t('style.fontSize')}
+            min={6}
+            max={72}
+            step={1}
+            value={[fontSize]}
+            onValueChange={([v]) => applyFontSize(v!)}
+          />
+        </div>
         <div>
           <span className="text-xs text-muted-foreground">
             {t('style.width')}: {style.strokeWidth}pt
