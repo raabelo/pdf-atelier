@@ -22,6 +22,7 @@ import {
   togglePause,
   useTts,
 } from '../tts/controller.ts'
+import { translateSelection } from '../translate/controller.ts'
 import {
   canCopy,
   canPaste,
@@ -299,6 +300,13 @@ export function createCommands(platform: Platform): Command[] {
       keys: ['Escape'],
       when: () => useTts.getState().state !== 'idle',
       run: stopReading,
+    },
+    {
+      id: 'translate.selection',
+      labelKey: 'cmd.translate',
+      keys: ['Mod+Shift+L'],
+      when: hasDoc,
+      run: () => void translateSelection(),
     },
   ]
 }

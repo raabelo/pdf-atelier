@@ -3,7 +3,7 @@ import { create } from 'zustand'
 
 export type Tool = 'select' | AnnotationType
 export type Zoom = number | 'fit-width' | 'fit-page'
-export type Panel = 'pages' | 'outline' | 'bookmarks' | 'annotations' | 'search' | 'tts'
+export type Panel = 'pages' | 'outline' | 'bookmarks' | 'annotations' | 'search' | 'tts' | 'translate'
 
 export interface ViewState {
   zoom: Zoom

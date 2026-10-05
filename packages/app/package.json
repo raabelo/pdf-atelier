@@ -12,6 +12,7 @@
     "@pdf-atelier/core": "workspace:*",
     "@pdf-atelier/pdf": "workspace:*",
     "@pdf-atelier/platform": "workspace:*",
+    "@pdf-atelier/translate": "workspace:*",
     "@pdf-atelier/tts": "workspace:*",
     "@tanstack/react-virtual": "^3.14.13",
     "class-variance-authority": "^0.7.1",

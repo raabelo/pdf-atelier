@@ -15,6 +15,7 @@ import { isDirty, useActiveDoc, useDocuments } from '../stores/documents.ts'
 import { goToPage, useUi, type Panel } from '../stores/ui.ts'
 import { useTts } from '../tts/controller.ts'
 import { TtsPanel } from '../tts/TtsPanel.tsx'
+import { TranslatePanel } from '../translate/TranslatePanel.tsx'
 import { Cmd } from './Toolbar.tsx'
 import { Button } from '../ui/button.tsx'
 import { Input } from '../ui/controls.tsx'
@@ -67,7 +68,7 @@ export function TabsBar() {
   )
 }
 
-const PANELS: Panel[] = ['pages', 'outline', 'bookmarks', 'annotations', 'search', 'tts']
+const PANELS: Panel[] = ['pages', 'outline', 'bookmarks', 'annotations', 'search', 'tts', 'translate']
 
 export function Sidebar() {
   const doc = useActiveDoc()
@@ -96,6 +97,8 @@ export function Sidebar() {
       <div role="tabpanel" className="min-h-0 flex-1">
         {panel === 'tts' ? (
           <TtsPanel />
+        ) : panel === 'translate' ? (
+          <TranslatePanel />
         ) : !doc ? null : panel === 'pages' ? (
           <Thumbnails key={doc.id} doc={doc} />
         ) : panel === 'outline' ? (
@@ -340,6 +343,8 @@ const CREDITS: [string, string][] = [
   ['Voz pt_BR faber', 'CC0'],
   ['Voz es_ES davefx', 'CC0'],
   ['Voz fr_FR siwis — SIWIS French Speech Synthesis Database', 'CC BY 4.0'],
+  ['Transformers.js', 'Apache-2.0'],
+  ['Opus-MT (Helsinki-NLP) — modelos de tradução', 'Apache-2.0 / CC BY 4.0 (en→de)'],
 ]
 
 export function AboutDialog() {

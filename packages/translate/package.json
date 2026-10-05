@@ -1,0 +1,14 @@
+{
+  "name": "@pdf-atelier/translate",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@huggingface/transformers": "4.3.0"
+  }
+}

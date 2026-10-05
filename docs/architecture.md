@@ -34,6 +34,7 @@ const platform = window.pdfAtelier
 apps/web ──► app ──► core
                ├───► pdf ──► core
                ├───► tts
+               ├───► translate
                └───► platform (contratos)
 apps/desktop ──► platform (ipc schema)      [main + preload, sem UI]
 ```
@@ -44,6 +45,7 @@ apps/desktop ──► platform (ipc schema)      [main + preload, sem UI]
 | `pdf` | Wrapper de PDF.js (render, texto, busca, links, import de anotações) e escritor com `@cantoo/pdf-lib` | `core` | Vazar tipos do PDF.js/pdf-lib |
 | `platform` | Contratos (`FileSystemAdapter`, `ShellAdapter`, `Platform`), schema IPC (zod), adapters web e electron (renderer) | `zod` | Importar `electron`/`node:*` |
 | `tts` | Providers de fala (Piper local via WASM, Web Speech), fragmentação em frases, gestão de modelos | `@mintplex-labs/piper-tts-web` | Conhecer a UI |
+| `translate` | Tradução local (Opus-MT via transformers.js em Web Worker), rotas de modelo com pivô em inglês, gestão de modelos | `@huggingface/transformers` | Conhecer a UI |
 | `app` | **A única UI**: shell, abas, viewer, ferramentas, painéis, stores, atalhos, i18n | todos acima | Chamar APIs de Electron diretamente |
 | `apps/web` | `index.html`, bootstrap, Vite, assets do PDF.js, deploy | `app`, `platform` | Componentes próprios |
 | `apps/desktop` | Janela, protocolo `app://`, handlers IPC, preload, empacotamento | `platform` (schema) | UI |

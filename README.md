@@ -42,6 +42,7 @@ packages/
   platform/   contratos + adapters web/electron + contrato IPC (zod)
   app/        a UI (React): shell, viewer, ferramentas, painéis, stores
   tts/        texto-para-fala: Piper local + Web Speech
+  translate/  tradução local: Opus-MT via transformers.js (worker)
 docs/         arquitetura, desenvolvimento, roadmap, ADRs
 e2e/          testes Playwright
 ```

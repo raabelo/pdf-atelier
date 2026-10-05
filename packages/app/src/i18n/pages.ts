@@ -1,4 +1,4 @@
-/** Strings for page tools, bookmarks, search, image export, TTS detection and PWA. Spread into messages.ts. */
+/** Strings for page tools, bookmarks, search, image export, TTS detection, translation and PWA. Spread into messages.ts. */
 export const pagesEn = {
   'cmd.page.insertBlank': 'Insert blank page',
   'cmd.page.duplicate': 'Duplicate pages',
@@ -44,6 +44,20 @@ export const pagesEn = {
   'tts.autoDetect': 'Detect language automatically',
   'tts.detected': 'Detected language: {lang}',
   'error.export': 'Could not export: {message}',
+  'cmd.translate': 'Translate selection',
+  'sidebar.translate': 'Translate',
+  'translate.from': 'From',
+  'translate.to': 'To',
+  'translate.auto': 'Detect language',
+  'translate.auto.selection': 'Translate selected text automatically',
+  'translate.selection': 'Translate selection',
+  'translate.detected': 'From {lang}',
+  'translate.working': 'Translating…',
+  'translate.copied': 'Translation copied',
+  'translate.models': 'Offline translation models',
+  'translate.offline':
+    'Translation runs on this device; text never leaves it. Models download on first use.',
+  'translate.error': 'Translation failed: {message}',
 } as const
 
 export const pagesPt: Record<keyof typeof pagesEn, string> = {
@@ -91,4 +105,18 @@ export const pagesPt: Record<keyof typeof pagesEn, string> = {
   'tts.autoDetect': 'Detectar idioma automaticamente',
   'tts.detected': 'Idioma detectado: {lang}',
   'error.export': 'Não foi possível exportar: {message}',
+  'cmd.translate': 'Traduzir seleção',
+  'sidebar.translate': 'Tradução',
+  'translate.from': 'De',
+  'translate.to': 'Para',
+  'translate.auto': 'Detectar idioma',
+  'translate.auto.selection': 'Traduzir texto selecionado automaticamente',
+  'translate.selection': 'Traduzir seleção',
+  'translate.detected': 'Do {lang}',
+  'translate.working': 'Traduzindo…',
+  'translate.copied': 'Tradução copiada',
+  'translate.models': 'Modelos de tradução offline',
+  'translate.offline':
+    'A tradução roda neste dispositivo; o texto não sai dele. Modelos baixados no primeiro uso.',
+  'translate.error': 'Falha na tradução: {message}',
 }

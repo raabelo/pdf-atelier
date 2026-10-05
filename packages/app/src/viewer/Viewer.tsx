@@ -6,6 +6,7 @@ import { useDocuments, type OpenDoc } from '../stores/documents.ts'
 import { useSettings } from '../stores/settings.ts'
 import { updateView, useUi, viewOf } from '../stores/ui.ts'
 import { readSelection } from '../tts/controller.ts'
+import { translateSelection } from '../translate/controller.ts'
 import { selectionToMarkup } from './markup.ts'
 import { PageView } from './PageView.tsx'
 
@@ -135,7 +136,9 @@ export function Viewer({ doc }: { doc: OpenDoc }) {
       window.getSelection()?.removeAllRanges()
       return
     }
-    if (useSettings.getState().tts.autoRead) readSelection(true)
+    const { tts, translate } = useSettings.getState()
+    if (tts.autoRead) readSelection(true)
+    if (translate.autoTranslate) translateSelection(true)
   }
 
   return (

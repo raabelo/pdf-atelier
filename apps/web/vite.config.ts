@@ -99,9 +99,13 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [react(), tailwindcss(), runtimeAssets(), swManifest()],
   // onnxruntime-web: use the build that loads its wasm from wasmPaths (/tts/ort/) instead of bundling a 2nd copy.
-  resolve: { conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions] },
+  // transformers.js imports onnxruntime-web/webgpu, whose wasm differs from Piper's; use the CPU wasm build so both share /tts/ort/.
+  resolve: {
+    conditions: ['onnxruntime-web-use-extern-wasm', ...defaultClientConditions],
+    alias: [{ find: /^onnxruntime-web\/webgpu$/, replacement: 'onnxruntime-web/wasm' }],
+  },
   worker: { format: 'es' },
-  optimizeDeps: { exclude: ['onnxruntime-web', '@mintplex-labs/piper-tts-web'] },
+  optimizeDeps: { exclude: ['onnxruntime-web', '@mintplex-labs/piper-tts-web', '@huggingface/transformers'] },
   server: { fs: { allow: [root] } },
   build: { target: 'es2023', chunkSizeWarningLimit: 2000 },
 })

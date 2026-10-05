@@ -6,3 +6,9 @@ onlyBuiltDependencies:
   - esbuild
 ignoredBuiltDependencies:
   - protobufjs
+overrides:
+  # One onnxruntime-web for Piper and translation: both load the same self-hosted wasm from /tts/ort/.
+  '@huggingface/transformers>onnxruntime-web': 1.30.0
+  # Node-only backends of transformers.js; the app runs it in the browser.
+  '@huggingface/transformers>onnxruntime-node': '-'
+  '@huggingface/transformers>sharp': '-'
