@@ -194,6 +194,7 @@ export function AnnotationLayer({ doc, page, rotation, scale, annotations }: Pro
     if (tool !== 'select' || e.button !== 0) return
     if (isDoublePress(a.id, e.timeStamp) && (a.type === 'freetext' || a.type === 'note')) {
       e.stopPropagation()
+      e.preventDefault() // the press's default focus change would blur (and close) the editor it opens
       return useUi.setState({ selection: [a.id], editing: a.id })
     }
     const sel = nextSelection(selection, a.id, e.shiftKey || e.ctrlKey || e.metaKey)

@@ -210,3 +210,22 @@ test('zooming keeps the current page in view', async ({ page }) => {
     await expect(footer.getByRole('button', { name: /^17$/ })).toBeVisible()
   }
 })
+
+test('double-clicking a placed text box reopens it for editing', async ({ page }) => {
+  await page.goto('/')
+  await dropPdf(page, await makePdf(1), 'texto.pdf')
+  const box = (await page.locator('[data-page-id]').first().boundingBox())!
+  await page.keyboard.press('t')
+  await page.mouse.move(box.x + 60, box.y + 150)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 220, box.y + 200, { steps: 5 })
+  await page.mouse.up()
+  const editor = page.locator('[data-page-id] textarea')
+  await editor.fill('Olá')
+  await page.keyboard.press('Escape')
+  await expect(editor).toHaveCount(0)
+
+  await page.mouse.dblclick(box.x + 80, box.y + 160)
+  await expect(editor).toBeFocused()
+  await expect(editor).toHaveValue('Olá')
+})
