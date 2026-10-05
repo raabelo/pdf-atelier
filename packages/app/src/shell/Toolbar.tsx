@@ -2,6 +2,7 @@ import { canRedo, canUndo, docOps, type AnnotationType } from '@pdf-atelier/core
 import {
   ArrowUpRight,
   Circle,
+  Download,
   FolderOpen,
   Info,
   Highlighter,
@@ -31,6 +32,7 @@ import {
 import { formatKeys, runCommand } from '../commands/registry.ts'
 import { t, type MessageKey } from '../i18n/index.ts'
 import { useActiveDoc, useDocuments } from '../stores/documents.ts'
+import { usePlatform } from '../platform.ts'
 import { useSettings } from '../stores/settings.ts'
 import { useUi, type Tool } from '../stores/ui.ts'
 import { PagesMenu } from '../sidebar/PagesMenu.tsx'
@@ -39,6 +41,10 @@ import { Separator, Slider } from '../ui/controls.tsx'
 import { IconButton, Popover } from '../ui/overlays.tsx'
 import { copyStyle, pasteStyle } from '../annotations/actions.ts'
 import { InsertDialogs } from '../annotations/InsertDialogs.tsx'
+
+/** Always the newest release's installer (electron-builder artifactName is version-free). */
+const WINDOWS_INSTALLER_URL =
+  'https://github.com/raabelo/pdf-atelier/releases/latest/download/PDF-Atelier-Setup.exe'
 
 const TOOLS: [Tool, LucideIcon][] = [
   ['select', MousePointer2],
@@ -245,6 +251,7 @@ function StyleControls() {
 }
 
 export function Toolbar() {
+  const platform = usePlatform()
   const doc = useActiveDoc()
   const tool = useUi((s) => s.tool)
   const theme = useSettings((s) => s.theme)
@@ -307,6 +314,14 @@ export function Toolbar() {
       <Separator vertical />
       <PagesMenu disabled={noDoc} />
       <div className="ml-auto" />
+      {!platform.onOpenFile && ( // web only: the desktop app already is the download
+        <IconButton
+          label={t('app.downloadWindows')}
+          onClick={() => void platform.shell.openExternal(WINDOWS_INSTALLER_URL)}
+        >
+          <Download />
+        </IconButton>
+      )}
       <Cmd id="help.about" icon={Info} />
       <IconButton
         label={`${t('cmd.view.toggleTheme')}: ${t(`theme.${theme}`)}`}
