@@ -1,4 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, protocol, session, shell, type IpcMainInvokeEvent } from 'electron'
+import { autoUpdater } from 'electron-updater'
 import { readFile } from 'node:fs/promises'
 import { basename, extname, join } from 'node:path'
 import { ipc, MENU_COMMAND_CHANNEL, OPEN_REQUEST_CHANNEL, safeExternalUrl, type IpcChannel, type IpcReq, type IpcRes } from '@pdf-atelier/platform'
@@ -181,6 +182,59 @@ function registerIpc(): void {
   })
 }
 
+// Updates come from GitHub Releases (latest.yml). Downloads in the background; installs on restart or on quit.
+function setupUpdater(): void {
+  if (!app.isPackaged) return
+  const pt = app.getLocale().startsWith('pt')
+  autoUpdater.on('update-downloaded', ({ version }) => {
+    const choice = dialog.showMessageBoxSync(win!, {
+      type: 'info',
+      buttons: pt ? ['Reiniciar agora', 'Depois'] : ['Restart now', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      message: pt
+        ? `PDF Atelier ${version} está pronto para instalar.`
+        : `PDF Atelier ${version} is ready to install.`,
+      detail: pt
+        ? 'Se escolher depois, a atualização será instalada ao fechar o app.'
+        : 'If you choose later, it installs when you close the app.',
+    })
+    if (choice === 0) autoUpdater.quitAndInstall()
+  })
+  autoUpdater.checkForUpdates().catch(() => {}) // offline or no release yet: try again next launch
+}
+
+async function checkForUpdatesManually(): Promise<void> {
+  const pt = app.getLocale().startsWith('pt')
+  const message = (text: string, type: 'info' | 'error' = 'info') =>
+    dialog.showMessageBox(win!, { type, message: text })
+  if (!app.isPackaged)
+    return void message(
+      pt
+        ? 'Atualizações só funcionam no app instalado.'
+        : 'Updates only work in the installed app.',
+    )
+  try {
+    const result = await autoUpdater.checkForUpdates()
+    if (!result?.isUpdateAvailable)
+      return void message(
+        pt
+          ? `Você já tem a versão mais recente (${app.getVersion()}).`
+          : `You have the latest version (${app.getVersion()}).`,
+      )
+    void message(
+      pt
+        ? `Baixando a versão ${result.updateInfo.version}…`
+        : `Downloading version ${result.updateInfo.version}…`,
+    )
+  } catch (e) {
+    void message(
+      `${pt ? 'Não foi possível verificar atualizações' : 'Could not check for updates'}: ${String(e)}`,
+      'error',
+    )
+  }
+}
+
 function buildMenu(): void {
   const pt = app.getLocale().startsWith('pt')
   const t = (en: string, ptBr: string) => (pt ? ptBr : en)
@@ -229,7 +283,14 @@ function buildMenu(): void {
           ...(app.isPackaged ? [] : [{ role: 'toggleDevTools' } as const, { role: 'reload' } as const]),
         ],
       },
-      { label: t('&Help', 'Aj&uda'), submenu: [cmd(t('About PDF Atelier', 'Sobre o PDF Atelier'), 'help.about')] },
+      {
+        label: t('&Help', 'Aj&uda'),
+        submenu: [
+          { label: t('Check for Updates…', 'Verificar atualizações…'), click: () => void checkForUpdatesManually() },
+          { type: 'separator' },
+          cmd(t('About PDF Atelier', 'Sobre o PDF Atelier'), 'help.about'),
+        ],
+      },
     ]),
   )
 }
@@ -291,5 +352,6 @@ void app.whenReady().then(async () => {
   registerIpc()
   buildMenu()
   createWindow()
+  setupUpdater()
   await queueArgvFiles(process.argv)
 })

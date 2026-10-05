@@ -55,7 +55,7 @@
       "shortcutName": "PDF Atelier",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
-      "artifactName": "PDF-Atelier-Setup-${version}.${ext}",
+      "artifactName": "PDF-Atelier-Setup.${ext}",
       "license": "../../LICENSE"
     },
     "electronFuses": {
@@ -66,6 +66,11 @@
       "enableEmbeddedAsarIntegrityValidation": true,
       "onlyLoadAppFromAsar": true,
       "grantFileProtocolExtraPrivileges": false
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "raabelo",
+      "repo": "pdf-atelier"
     },
     "asar": true,
     "fileAssociations": [
@@ -82,5 +87,8 @@
   },
   "description": "PDF reader and editor",
   "author": "PDF Atelier",
-  "license": "AGPL-3.0-only"
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "electron-updater": "^6.8.9"
+  }
 }
