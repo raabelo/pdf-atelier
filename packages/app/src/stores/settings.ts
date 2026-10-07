@@ -1,11 +1,14 @@
 import { openDB } from 'idb'
 import { create } from 'zustand'
+import type { Zoom } from './ui.ts'
 
 export type Theme = 'light' | 'dark' | 'system'
 
 export interface Settings {
   theme: Theme
   locale: 'pt-BR' | 'en'
+  /** Last zoom the user picked; new and reopened documents start with it. */
+  zoom: Zoom
   tts: {
     lang: string
     voiceId: string | null
@@ -26,6 +29,7 @@ const isPt = typeof navigator !== 'undefined' && navigator.language.toLowerCase(
 const defaults: Settings = {
   theme: 'system',
   locale: isPt ? 'pt-BR' : 'en',
+  zoom: 'fit-width',
   tts: { lang: 'pt-BR', voiceId: null, rate: 1, autoRead: false, autoDetect: true },
   translate: { from: 'auto', to: isPt ? 'pt' : 'en', autoTranslate: false },
 }
@@ -61,12 +65,12 @@ export async function loadSettings() {
     useSettings.setState({ loaded: true }) // private mode / storage disabled: keep defaults
   }
   let timer: ReturnType<typeof setTimeout> | undefined
-  useSettings.subscribe(({ theme, locale, tts, translate }) => {
+  useSettings.subscribe(({ theme, locale, zoom, tts, translate }) => {
     clearTimeout(timer)
     timer = setTimeout(
       () =>
         void db()
-          .then((d) => d.put('kv', { theme, locale, tts, translate }, 'settings'))
+          .then((d) => d.put('kv', { theme, locale, zoom, tts, translate }, 'settings'))
           .catch(() => {}),
       300,
     )

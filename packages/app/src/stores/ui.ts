@@ -1,5 +1,6 @@
 import type { AnnotationStyle, AnnotationType, Clipboard, Rect, Rotation } from '@pdf-atelier/core'
 import { create } from 'zustand'
+import { useSettings } from './settings.ts'
 
 export type Tool = 'select' | AnnotationType
 export type Zoom = number | 'fit-width' | 'fit-page'
@@ -110,9 +111,10 @@ export const useUi = create<UiStore>((set) => ({
 }))
 
 export const viewOf = (docId: string | null | undefined): ViewState =>
-  (docId && useUi.getState().views[docId]) || defaultView
+  (docId && useUi.getState().views[docId]) || { ...defaultView, zoom: useSettings.getState().zoom }
 
 export function updateView(docId: string, patch: Partial<ViewState>) {
+  if (patch.zoom !== undefined) useSettings.getState().set({ zoom: patch.zoom })
   useUi.setState((s) => ({
     views: { ...s.views, [docId]: { ...viewOf(docId), ...s.views[docId], ...patch } },
   }))
